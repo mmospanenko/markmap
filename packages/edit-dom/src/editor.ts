@@ -461,6 +461,7 @@ export class MarkmapEditor {
     field.style.left = `${rect.x - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
     field.style.width = `${width}px`;
+    field.style.height = 'auto';
     field.style.height = `${Math.max(1, rect.height / scale, field.scrollHeight)}px`;
     field.style.transform = `scale(${scale})`;
   }
