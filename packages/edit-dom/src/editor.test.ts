@@ -314,6 +314,16 @@ describe('MarkmapEditor', () => {
     expect(editor.canUndo).toBe(false);
   });
 
+  it('[TC-2-8-2] commits an in-progress label on demand', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'c');
+    editor.commit();
+    expect(editor.source).toBe('- c\n- b\n');
+    expect(editor.isEditing).toBe(false);
+  });
+
   it('[TC-2-9-1] keeps a fold after a rename', () => {
     const { container, view, editor } = setup('- a\n  - a1\n- b\n');
     const a = nodeId(editor, 'a');
