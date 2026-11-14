@@ -139,6 +139,16 @@ describe('MarkmapEditor', () => {
     expect(group?.classList.contains('mm-editor-selected')).toBe(true);
   });
 
+  it('[TC-2-1-3] draws a selection frame around the selected node', () => {
+    const { container } = setup();
+    const box = container.querySelector<HTMLDivElement>('.mm-editor-selection');
+    expect(box?.style.display).toBe('block');
+    expect(box?.style.left).toBe('8px');
+    expect(box?.style.top).toBe('18px');
+    expect(box?.style.width).toBe('104px');
+    expect(box?.style.height).toBe('34px');
+  });
+
   it('[TC-2-1-2] selects a node on click and highlights it', () => {
     const { container, view, editor } = setup();
     const id = nodeId(editor, 'b');
@@ -180,6 +190,18 @@ describe('MarkmapEditor', () => {
     type(container, 'child');
     key(field(container), 'Enter');
     expect(editor.source).toBe('- a\n  - child\n  - New topic\n- b\n');
+  });
+
+  it('[TC-2-2-5] starts a new node with an empty label', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Enter');
+    expect(field(container).value).toBe('');
+    expect(editor.source).toContain('\u200B');
+    type(container, 'c');
+    editor.commit();
+    expect(editor.source).toBe('- a\n- c\n- b\n');
+    expect(editor.isEditing).toBe(false);
   });
 
   it('[TC-2-2-4] reveals a new node when it has no screen rect', () => {

@@ -10,10 +10,11 @@ import { History } from './history';
 import type { EditView, EditorChange, HistoryEntry, MarkmapEditorOptions } from './types';
 
 const STYLE_ID = 'mm-editor-style';
+const EMPTY_LABEL = '\u200B';
 const STYLE = `
 .mm-editor-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
 .mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto;transform-origin:top left}
-.mm-editor-selected text{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.mm-editor-selection{position:absolute;display:none;pointer-events:none;box-sizing:border-box;border:2px solid var(--oc-focus,#0097e6);border-radius:6px}
 .mm-editor-editing text{visibility:hidden}
 `;
 const styleUsers = new WeakMap<Document, number>();
@@ -42,6 +43,7 @@ function releaseStyle(doc: Document): void {
 interface Editing {
   nodeId: string;
   original: string;
+  blank: boolean;
   field: HTMLTextAreaElement;
 }
 
@@ -49,6 +51,7 @@ export class MarkmapEditor {
   private readonly view: EditView;
   private readonly container: HTMLElement;
   private readonly field: HTMLTextAreaElement;
+  private readonly selectionBox: HTMLDivElement;
   private readonly layer: HTMLDivElement;
   private readonly history = new History();
   private readonly onChange?: (change: EditorChange) => void;
@@ -81,6 +84,8 @@ export class MarkmapEditor {
 
     this.layer = doc.createElement('div');
     this.layer.className = 'mm-editor-layer';
+    this.selectionBox = doc.createElement('div');
+    this.selectionBox.className = 'mm-editor-selection';
     this.field = doc.createElement('textarea');
     this.field.className = 'mm-editor-field';
     this.field.spellcheck = false;
@@ -88,7 +93,7 @@ export class MarkmapEditor {
     this.field.setAttribute('autocapitalize', 'off');
     this.field.setAttribute('wrap', 'soft');
     this.field.addEventListener('input', this.handleInput);
-    this.layer.append(this.field);
+    this.layer.append(this.selectionBox, this.field);
     container.append(this.layer);
 
     container.addEventListener('keydown', this.handleKeyDown);
@@ -165,10 +170,11 @@ export class MarkmapEditor {
     const rect = this.view.screenRect(nodeId);
     if (!rect) return;
     const label = labelText(this.doc, node);
-    const text = initialText ?? label;
+    const blank = label === EMPTY_LABEL;
+    const text = initialText ?? (blank ? '' : label);
     this.field.value = text;
     this.field.style.display = 'block';
-    this.editing = { nodeId, original: label, field: this.field };
+    this.editing = { nodeId, original: label, blank, field: this.field };
     this.paintEditing();
     this.positionEditing();
     this.field.focus({ preventScroll: true });
@@ -391,7 +397,7 @@ export class MarkmapEditor {
     const editing = this.editing;
     if (!editing) return 'none';
     const text = editing.field.value;
-    if (text === editing.original) {
+    if (text === editing.original || (editing.blank && text === '')) {
       this.stopEditingUi();
       return 'none';
     }
@@ -515,7 +521,9 @@ export class MarkmapEditor {
 
   private selectedLabel(): string {
     const node = this.selectedNode();
-    return node ? labelText(this.doc, node) : '';
+    if (!node) return '';
+    const label = labelText(this.doc, node);
+    return label === EMPTY_LABEL ? '' : label;
   }
 
   private snapshot(): HistoryEntry {
@@ -563,7 +571,22 @@ export class MarkmapEditor {
     this.view.element.querySelectorAll('.mm-editor-selected').forEach((element) => {
       element.classList.remove('mm-editor-selected');
     });
-    if (this.selectedId) this.nodeGroup(this.selectedId)?.classList.add('mm-editor-selected');
+    if (!this.selectedId) {
+      this.selectionBox.style.display = 'none';
+      return;
+    }
+    this.nodeGroup(this.selectedId)?.classList.add('mm-editor-selected');
+    const rect = this.view.screenRect(this.selectedId);
+    const box = this.container.getBoundingClientRect();
+    if (!rect) {
+      this.selectionBox.style.display = 'none';
+      return;
+    }
+    this.selectionBox.style.display = 'block';
+    this.selectionBox.style.left = `${rect.x - box.x - 2}px`;
+    this.selectionBox.style.top = `${rect.y - box.y - 2}px`;
+    this.selectionBox.style.width = `${rect.width + 4}px`;
+    this.selectionBox.style.height = `${rect.height + 4}px`;
   }
 
   private paintEditing(): void {
