@@ -17,6 +17,33 @@ Turn Markdown into interactive mind maps.
 
 Headings and list items become branches you can fold, zoom and pan. Other text, such as paragraphs and code, stays with its branch as a note that opens in a popover.
 
+## Fork additions
+
+This internal fork keeps the renderer packages unchanged and adds a source-preserving editing layer:
+
+| Package          | What it does                                                      |
+| ---------------- | ----------------------------------------------------------------- |
+| `@markmap/model` | Validated editable projection of a Markmap tree over its Markdown |
+| `@markmap/edit`  | Commands that return splices and a selection offset               |
+
+```js
+import { parseDocument } from '@markmap/model';
+import { applyCommand } from '@markmap/edit';
+
+const parsed = parseDocument('# Trip\n\n- Pack\n');
+const pack = parsed.document.nodes.get(parsed.document.order[1]);
+const result = applyCommand(parsed.document, {
+  type: 'insertSibling',
+  node: pack.id,
+  text: 'Book flights',
+});
+
+result.document.source;
+result.tree;
+```
+
+Markdown stays the source of truth. A command changes only its own range, then the next snapshot is parsed and validated. The fork is consumed through git and is not published to npm.
+
 ## Where to use it
 
 - **[VS Code](https://marketplace.visualstudio.com/items?itemName=gera2ld.markmap-vscode):** preview a map beside your Markdown as you type.
@@ -96,6 +123,8 @@ This writes `notes.html`, one file that works offline, and opens it. Use `--svg`
 | Package                | What it does                       |
 | ---------------------- | ---------------------------------- |
 | `@markmap/parse`       | Markdown to a tree                 |
+| `@markmap/model`       | Validated editable projection      |
+| `@markmap/edit`        | Source-preserving edit commands    |
 | `@markmap/render`      | Layouts, themes and SVG output     |
 | `@markmap/view`        | The interactive map                |
 | `@markmap/canvas`      | Canvas renderer and PNG export     |

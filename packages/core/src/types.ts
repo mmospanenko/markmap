@@ -12,6 +12,16 @@ export interface Note {
   after: number;
 }
 
+export interface SourceRange {
+  start: number;
+  end: number;
+}
+
+export interface NodeSource {
+  label?: SourceRange;
+  block: SourceRange;
+}
+
 export interface MarkmapNode {
   /** Stable id derived from the parent path and content. */
   id: string;
@@ -21,6 +31,7 @@ export interface MarkmapNode {
   /** Plugin data such as fold, checked, color or icon. */
   data: Record<string, unknown>;
   /** Source offsets, for click-to-source and graph-to-Markdown editing. */
-  position?: { start: number; end: number };
+  position?: SourceRange;
+  source?: NodeSource;
   children: MarkmapNode[];
 }

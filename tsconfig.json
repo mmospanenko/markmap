@@ -3,6 +3,8 @@
   "references": [
     { "path": "./packages/core" },
     { "path": "./packages/parse" },
+    { "path": "./packages/model" },
+    { "path": "./packages/edit" },
     { "path": "./packages/render" },
     { "path": "./packages/view" },
     { "path": "./packages/plugin-math" },

@@ -11,6 +11,7 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "test": "vitest --run",
+    "check:trace": "node scripts/check-trace.mjs",
     "typecheck": "tsc -p tsconfig.test.json",
     "clean": "pnpm -r clean",
     "build:types": "tsc -b",

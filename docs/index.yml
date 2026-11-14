@@ -1,0 +1,7 @@
+documents:
+  - id: PRD-1
+    title: Editable Markmap model
+    path: prd/0001-editable-model.md
+  - id: ADR-1
+    title: Source-preserving edits over a validated model
+    path: adr/0001-source-preserving-edits.md

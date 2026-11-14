@@ -1,0 +1,29 @@
+{
+  "name": "@markmap/model",
+  "version": "1.1.1",
+  "private": true,
+  "description": "Validated editable projection of a Markmap tree over its Markdown source",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markmap/markmap.git",
+    "directory": "packages/model"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "build:types": "tsc -b",
+    "build:js": "vite build"
+  },
+  "dependencies": {
+    "@markmap/core": "workspace:*",
+    "@markmap/parse": "workspace:*"
+  }
+}

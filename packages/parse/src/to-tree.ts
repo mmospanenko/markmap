@@ -1,5 +1,12 @@
-import { assignIds, type Note, type MarkmapNode, type MdastBlock } from '@markmap/core';
-import type { List, ListItem, Node, PhrasingContent, Root, RootContent } from 'mdast';
+import {
+  assignIds,
+  type NodeSource,
+  type Note,
+  type MarkmapNode,
+  type MdastBlock,
+  type SourceRange,
+} from '@markmap/core';
+import type { Heading, List, ListItem, Node, PhrasingContent, Root, RootContent } from 'mdast';
 
 export interface ToTreeOptions {
   /** Title for a synthesized root, usually from frontmatter. */
@@ -18,13 +25,15 @@ export interface ToTreeOptions {
  *   and everything below.
  */
 export function toTree(mdast: Root, options: ToTreeOptions = {}): MarkmapNode {
+  const docEnd = mdast.position?.end.offset ?? 0;
+  const sectionEnds = readSectionEnds(mdast.children, docEnd);
   let root = createNode('root', options.title ? [{ type: 'text', value: options.title }] : []);
   const stack: { depth: number; node: MarkmapNode }[] = [{ depth: 0, node: root }];
 
   for (const block of mdast.children) {
     if (block.type === 'heading') {
       while (stack.length > 1 && stack.at(-1)!.depth >= block.depth) stack.pop();
-      const node = createNode('heading', block.children, block);
+      const node = createNode('heading', block.children, block, sectionEnds.get(block));
       node.data.depth = block.depth;
       stack.at(-1)!.node.children.push(node);
       stack.push({ depth: block.depth, node });
@@ -37,15 +46,56 @@ export function toTree(mdast: Root, options: ToTreeOptions = {}): MarkmapNode {
   return assignIds(root);
 }
 
-function createNode(type: string, label: PhrasingContent[], source?: Node): MarkmapNode {
+function readSectionEnds(children: RootContent[], docEnd: number): Map<Heading, number> {
+  const ends = new Map<Heading, number>();
+  const open: { depth: number; node: Heading }[] = [];
+  for (const block of children) {
+    if (block.type !== 'heading') continue;
+    while (open.length && open[open.length - 1].depth >= block.depth) {
+      const closed = open.pop()!;
+      ends.set(closed.node, block.position?.start.offset ?? docEnd);
+    }
+    open.push({ depth: block.depth, node: block });
+  }
+  for (const item of open) ends.set(item.node, docEnd);
+  return ends;
+}
+
+function createNode(
+  type: string,
+  label: PhrasingContent[],
+  source?: Node,
+  blockEnd?: number,
+): MarkmapNode {
   const { content, directives } = readLabel(label);
   const node: MarkmapNode = { id: '', type, content, notes: [], data: {}, children: [] };
   if (directives.has('fold')) node.data.fold = true;
   if (directives.has('foldAll')) node.data.foldAll = true;
   const start = source?.position?.start.offset;
   const end = source?.position?.end.offset;
-  if (start != null && end != null) node.position = { start, end };
+  if (start != null && end != null) {
+    const range: SourceRange = { start, end };
+    const info: NodeSource = { block: { start, end: blockEnd ?? end } };
+    const labelRange = inlineRange(label);
+    if (labelRange) info.label = labelRange;
+    node.position = range;
+    node.source = info;
+  }
   return node;
+}
+
+function inlineRange(label: PhrasingContent[]): SourceRange | undefined {
+  const first = label.find((node) => node.type !== 'html' && node.position);
+  const last = label.findLast((node) => node.type !== 'html' && node.position);
+  if (!first?.position || !last?.position) return undefined;
+  const startOffset = first.position.start.offset;
+  const endOffset = last.position.end.offset;
+  if (startOffset == null || endOffset == null) return undefined;
+  let start = startOffset;
+  let end = endOffset;
+  if (first.type === 'text') start += first.value.length - first.value.trimStart().length;
+  if (last.type === 'text') end -= last.value.length - last.value.trimEnd().length;
+  return start <= end ? { start, end } : undefined;
 }
 
 function addBlock(parent: MarkmapNode, block: RootContent) {
@@ -70,7 +120,12 @@ function fromListItem(item: ListItem, list: List): MarkmapNode {
   const [first, ...rest] = item.children;
   // `- # Title` uses the heading as the label too.
   const hasLabel = first?.type === 'paragraph' || first?.type === 'heading';
-  const node = createNode('listItem', hasLabel ? first.children : [], item);
+  const node = createNode(
+    'listItem',
+    hasLabel ? first.children : [],
+    item,
+    item.position?.end.offset,
+  );
   if (list.ordered) node.data.ordered = true;
   if (item.checked != null) node.data.checked = item.checked;
   for (const block of hasLabel ? rest : item.children) addBlock(node, block);

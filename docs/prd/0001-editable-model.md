@@ -1,0 +1,43 @@
+# [PRD-1] Editable Markmap model
+
+## Context
+
+Markmap renders Markdown as a mind map. Upstream treats Markdown as the only source of truth and does not edit nodes. This fork adds an editable projection without rewriting untouched Markdown.
+
+The projection is a validated snapshot of the tree over the original text. Commands change only the affected source ranges. The Markmap renderer keeps working with the same tree and never sees a custom document format.
+
+## Requirements
+
+- [REQ-1-1] When Markdown is parsed, each tree node shall expose its label and block character ranges, and a heading block shall cover the whole section.
+- [REQ-1-2] When a document is built, the model shall expose node kind, level, list info, parent, children and capabilities, shall return the render tree, and the validator shall report structural issues.
+- [REQ-1-3] When a node is renamed or a sibling or child is inserted, the command shall change only the affected source ranges, return a selection offset and reject a label that breaks the tree shape.
+- [REQ-1-4] When a node is deleted, its whole block, including descendants and notes, shall be removed.
+- [REQ-1-5] When a node is outdented, the node and its descendants shall move after the parent block with the parent level or indent.
+- [REQ-1-6] When a task checkbox is toggled, only the checkbox marker shall change.
+- [REQ-1-7] Commands shall preserve the document line ending style.
+- [REQ-1-8] Commands shall handle end of file, frontmatter, ordered lists, multi-line labels and invalid labels, and a failed command shall leave the input document unchanged.
+- [REQ-1-9] A command shall not change bytes outside its edit ranges.
+- [REQ-1-10] The splice engine shall apply non-overlapping edits and map source offsets through them.
+
+## Acceptance tests
+
+Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the case number. `scripts/check-trace.mjs` verifies coverage in both directions.
+
+| Requirement | Tests                        |
+| ----------- | ---------------------------- |
+| REQ-1-1     | TC-1-1-1, TC-1-1-2, TC-1-1-3 |
+| REQ-1-2     | TC-1-2-1 ... TC-1-2-9        |
+| REQ-1-3     | TC-1-3-1 ... TC-1-3-7        |
+| REQ-1-4     | TC-1-4-1                     |
+| REQ-1-5     | TC-1-5-1 ... TC-1-5-4        |
+| REQ-1-6     | TC-1-6-1                     |
+| REQ-1-7     | TC-1-7-1                     |
+| REQ-1-8     | TC-1-8-1 ... TC-1-8-14       |
+| REQ-1-9     | TC-1-9-1                     |
+| REQ-1-10    | TC-1-10-1, TC-1-10-2         |
+
+## Out of scope
+
+- The DOM editing layer: overlay editor, keyboard binding, selection highlight and undo. It consumes this library and lands separately.
+- Clipboard, drag and drop, multi-select, and saving fold state to Markdown.
+- Publishing the fork to npm.

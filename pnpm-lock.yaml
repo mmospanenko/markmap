@@ -269,6 +269,18 @@ importers:
         specifier: ^4.0.4
         version: 4.0.4
 
+  packages/edit:
+    dependencies:
+      '@markmap/core':
+        specifier: workspace:*
+        version: link:../core
+      '@markmap/model':
+        specifier: workspace:*
+        version: link:../model
+      '@markmap/parse':
+        specifier: workspace:*
+        version: link:../parse
+
   packages/element:
     dependencies:
       '@markmap/canvas':
@@ -290,6 +302,15 @@ importers:
       happy-dom:
         specifier: ^21.0.4
         version: 21.0.4
+
+  packages/model:
+    dependencies:
+      '@markmap/core':
+        specifier: workspace:*
+        version: link:../core
+      '@markmap/parse':
+        specifier: workspace:*
+        version: link:../parse
 
   packages/page:
     devDependencies:

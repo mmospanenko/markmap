@@ -80,6 +80,33 @@ describe('parse', () => {
     expect(md.slice(item.position!.start, item.position!.end)).toBe('- item');
   });
 
+  it('[TC-1-1-1] records label and section ranges', () => {
+    const md = '# A\n\n## B\n\nText.\n\n- x\n\n# C\n';
+    const { root } = parse(md);
+    const [a, c] = root.children;
+    const b = a.children[0];
+    const x = b.children[0];
+    expect(a.position).toEqual({ start: 0, end: 3 });
+    expect(a.source).toEqual({ label: { start: 2, end: 3 }, block: { start: 0, end: 23 } });
+    expect(b.source).toEqual({ label: { start: 8, end: 9 }, block: { start: 5, end: 23 } });
+    expect(x.source).toEqual({ label: { start: 20, end: 21 }, block: { start: 18, end: 21 } });
+    expect(c.source?.block).toEqual({ start: 23, end: 27 });
+  });
+
+  it('[TC-1-1-2] excludes directives and trailing space from the label', () => {
+    const md = '# A\n\n- a <!-- markmap: fold -->\n';
+    const { root } = parse(md);
+    expect(root.children[0].source?.label).toEqual({ start: 7, end: 8 });
+    expect(root.children[0].data.fold).toBe(true);
+  });
+
+  it('[TC-1-1-3] leaves empty labels undefined', () => {
+    const list = parse('- \n- b').root.children[0];
+    expect(list.source).toEqual({ block: { start: 0, end: 2 } });
+    const heading = parse('# A\n\n#').root.children[1];
+    expect(heading.source).toEqual({ block: { start: 5, end: 6 } });
+  });
+
   it('keeps ids stable when unrelated content changes', () => {
     const before = parse('# T\n\n## A\n\n- x\n\n## B\n\n- y').root;
     const after = parse('# Renamed\n\n## New\n\n## A\n\nNote.\n\n- x\n\n## B\n\n- y').root;
