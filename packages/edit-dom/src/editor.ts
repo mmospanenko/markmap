@@ -177,6 +177,7 @@ export class MarkmapEditor {
     this.editing = { nodeId, original: label, blank, field: this.field };
     this.paintEditing();
     this.positionEditing();
+    this.paintSelection();
     this.field.focus({ preventScroll: true });
     if (options.selectAll) this.field.select();
     else this.field.setSelectionRange(text.length, text.length);
@@ -220,12 +221,13 @@ export class MarkmapEditor {
   private handleInput = (): void => {
     if (!this.editing) return;
     this.positionEditing();
+    this.paintSelection();
   };
 
   private handleViewChange = (): void => {
+    if (this.editing) this.positionEditing();
     this.paintSelection();
     this.paintEditing();
-    if (this.editing) this.positionEditing();
   };
 
   private handleClick = (event: MouseEvent): void => {
@@ -438,6 +440,7 @@ export class MarkmapEditor {
     this.editing.field.style.display = 'none';
     this.editing = null;
     this.paintEditing();
+    this.paintSelection();
     this.container.focus({ preventScroll: true });
   }
 
@@ -578,7 +581,9 @@ export class MarkmapEditor {
       return;
     }
     this.nodeGroup(this.selectedId)?.classList.add('mm-editor-selected');
-    const rect = this.view.screenRect(this.selectedId);
+    const rect = this.editing
+      ? this.editing.field.getBoundingClientRect()
+      : this.view.screenRect(this.selectedId);
     const box = this.container.getBoundingClientRect();
     if (!rect) {
       this.selectionBox.style.display = 'none';
