@@ -182,6 +182,14 @@ describe('MarkmapEditor', () => {
     expect(editor.source).toBe('- a\n  - child\n  - New topic\n- b\n');
   });
 
+  it('[TC-2-2-4] reveals a new node when it has no screen rect', () => {
+    const { container, view, editor } = setup();
+    view.screenRect = () => undefined;
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Enter');
+    expect(view.focused.length).toBeGreaterThan(0);
+  });
+
   it('[TC-2-3-1] cancels editing with Escape', () => {
     const { container, view, editor } = setup();
     const id = nodeId(editor, 'a');

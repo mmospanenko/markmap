@@ -344,7 +344,7 @@ export class MarkmapEditor {
     if (!result) return;
     const created = nodeAtOffset(result.document, result.selection);
     if (created) {
-      this.select(created.id, { reveal: false });
+      this.select(created.id);
       this.startEditing(created.id, undefined, { selectAll: true });
     }
   }
@@ -419,7 +419,7 @@ export class MarkmapEditor {
     if (!result) return;
     const created = nodeAtOffset(result.document, result.selection);
     if (created) {
-      this.select(created.id, { reveal: false });
+      this.select(created.id);
       this.startEditing(created.id, undefined, { selectAll: true });
     }
   }
