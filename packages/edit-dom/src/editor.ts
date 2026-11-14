@@ -219,8 +219,7 @@ export class MarkmapEditor {
 
   private handleInput = (): void => {
     if (!this.editing) return;
-    const field = this.editing.field;
-    field.style.height = `${Math.max(1, field.scrollHeight)}px`;
+    this.positionEditing();
   };
 
   private handleViewChange = (): void => {
@@ -453,9 +452,10 @@ export class MarkmapEditor {
     const box = this.container.getBoundingClientRect();
     const field = editing.field;
     const scale = this.view.scale;
+    const width = Math.max(rect.width, 120);
     field.style.left = `${rect.x - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
-    field.style.width = `${Math.max(1, rect.width) / scale}px`;
+    field.style.width = `${width / scale}px`;
     field.style.height = `${Math.max(1, rect.height, field.scrollHeight) / scale}px`;
     field.style.transform = `scale(${scale})`;
   }
