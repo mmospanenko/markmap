@@ -452,11 +452,13 @@ export class MarkmapEditor {
     const box = this.container.getBoundingClientRect();
     const field = editing.field;
     const scale = this.view.scale;
-    const width = Math.max(rect.width, 120);
+    const fontSize = Number.parseFloat(getComputedStyle(field).fontSize) || 16;
+    const textWidth = field.value.length * fontSize * 0.65 + 16;
+    const width = Math.max(rect.width / scale, textWidth, 40);
     field.style.left = `${rect.x - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
-    field.style.width = `${width / scale}px`;
-    field.style.height = `${Math.max(1, rect.height, field.scrollHeight) / scale}px`;
+    field.style.width = `${width}px`;
+    field.style.height = `${Math.max(1, rect.height / scale, field.scrollHeight)}px`;
     field.style.transform = `scale(${scale})`;
   }
 

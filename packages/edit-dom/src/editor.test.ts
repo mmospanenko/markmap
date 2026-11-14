@@ -309,7 +309,7 @@ describe('MarkmapEditor', () => {
     expect(element.style.display).toBe('block');
     expect(element.style.left).toBe('10px');
     expect(element.style.top).toBe('20px');
-    expect(element.style.width).toBe('120px');
+    expect(element.style.width).toBe('100px');
     expect(element.style.transform).toBe('scale(1)');
   });
 
@@ -319,7 +319,7 @@ describe('MarkmapEditor', () => {
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, 'F2');
     const element = field(container);
-    expect(element.style.width).toBe('60px');
+    expect(element.style.width).toBe('50px');
     expect(element.style.height).toBe('15px');
     expect(element.style.transform).toBe('scale(2)');
   });
