@@ -3,6 +3,7 @@ import type { Document } from '@markmap/model';
 
 export interface EditView {
   readonly element: Element;
+  readonly scale: number;
   readonly foldedIds: ReadonlySet<string>;
   setTree(root: MarkmapNode): void;
   setFolded(id: string, folded: boolean): void;

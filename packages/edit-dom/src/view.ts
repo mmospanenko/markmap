@@ -4,6 +4,9 @@ import type { EditView } from './types';
 export function createEditView(mm: Markmap): EditView {
   return {
     element: mm.element,
+    get scale() {
+      return mm.transform.k;
+    },
     get foldedIds() {
       return mm.foldedIds;
     },

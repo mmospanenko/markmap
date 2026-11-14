@@ -12,7 +12,7 @@ import type { EditView, EditorChange, HistoryEntry, MarkmapEditorOptions } from 
 const STYLE_ID = 'mm-editor-style';
 const STYLE = `
 .mm-editor-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
-.mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto}
+.mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto;transform-origin:top left}
 .mm-editor-selected text{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
 .mm-editor-editing text{visibility:hidden}
 `;
@@ -442,10 +442,12 @@ export class MarkmapEditor {
     }
     const box = this.container.getBoundingClientRect();
     const field = editing.field;
+    const scale = this.view.scale;
     field.style.left = `${rect.x - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
-    field.style.width = `${Math.max(1, rect.width)}px`;
-    field.style.height = `${Math.max(1, rect.height, field.scrollHeight)}px`;
+    field.style.width = `${Math.max(1, rect.width) / scale}px`;
+    field.style.height = `${Math.max(1, rect.height, field.scrollHeight) / scale}px`;
+    field.style.transform = `scale(${scale})`;
   }
 
   private navigate(key: string): void {

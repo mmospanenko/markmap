@@ -9,6 +9,7 @@ import type { EditView, HistoryEntry, MarkmapEditorOptions } from './types';
 
 class FakeView implements EditView {
   element = document.createElement('div');
+  scale = 1;
   folded = new Set<string>();
   tree?: MarkmapNode;
   hit: { kind: string; nodeId?: string } | undefined;
@@ -279,6 +280,18 @@ describe('MarkmapEditor', () => {
     expect(element.style.left).toBe('10px');
     expect(element.style.top).toBe('20px');
     expect(element.style.width).toBe('100px');
+    expect(element.style.transform).toBe('scale(1)');
+  });
+
+  it('[TC-2-7-2] scales the field with the map zoom', () => {
+    const { container, view, editor } = setup();
+    view.scale = 2;
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    const element = field(container);
+    expect(element.style.width).toBe('50px');
+    expect(element.style.height).toBe('15px');
+    expect(element.style.transform).toBe('scale(2)');
   });
 
   it('[TC-2-8-1] emits changes and accepts a new source', () => {
