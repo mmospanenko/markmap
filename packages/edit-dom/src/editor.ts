@@ -456,13 +456,14 @@ export class MarkmapEditor {
     const field = editing.field;
     const scale = this.view.scale;
     const fontSize = Number.parseFloat(getComputedStyle(field).fontSize) || 16;
+    const lineHeight = 20;
     const textWidth = field.value.length * fontSize * 0.85 + 16;
     const width = Math.max(rect.width / scale, textWidth, 40);
+    const rows = field.value.split('\n').length;
     field.style.left = `${rect.x - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
     field.style.width = `${width}px`;
-    field.style.height = 'auto';
-    field.style.height = `${Math.max(1, rect.height / scale, field.scrollHeight)}px`;
+    field.style.height = `${Math.max(1, rect.height / scale, rows * lineHeight)}px`;
     field.style.transform = `scale(${scale})`;
   }
 

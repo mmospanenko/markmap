@@ -320,7 +320,7 @@ describe('MarkmapEditor', () => {
     key(container, 'F2');
     const element = field(container);
     expect(element.style.width).toBe('50px');
-    expect(element.style.height).toBe('15px');
+    expect(element.style.height).toBe('20px');
     expect(element.style.transform).toBe('scale(2)');
   });
 
