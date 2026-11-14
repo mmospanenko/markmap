@@ -91,6 +91,13 @@ describe('model', () => {
     expect(labelText(doc, nodeAtOffset(doc, sample.indexOf('B'))!)).toBe('B');
   });
 
+  it('[TC-1-2-10] finds a promoted root at its own label', () => {
+    const doc = buildDocument('# A\n');
+    const node = nodeAtOffset(doc, doc.source.indexOf('A'));
+    expect(node?.kind).toBe('root');
+    expect(labelText(doc, node!)).toBe('A');
+  });
+
   it('[TC-1-2-7] accepts a valid document', () => {
     expect(validateDocument(buildDocument(sample))).toEqual([]);
   });

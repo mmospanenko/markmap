@@ -251,6 +251,74 @@ describe('edit edges', () => {
       EditError,
     );
   });
+
+  it('[TC-1-8-21] inserts the first heading into an empty or blank document', () => {
+    for (const source of ['', '\n', '\n\n', '  ', '\r\n']) {
+      const doc = buildDocument(source);
+      const result = applyCommand(doc, {
+        type: 'insertFirst',
+        node: doc.root,
+        text: 'First note',
+      });
+      expect(result.document.source).toBe('# First note');
+      expect(result.selection).toBe(2);
+      expect(result.document.nodes.size).toBe(1);
+      expect(result.document.nodes.get(result.document.root)?.label).toEqual({
+        start: 2,
+        end: 12,
+      });
+    }
+  });
+
+  it('[TC-1-8-22] appends the first heading after frontmatter', () => {
+    const withNewline = buildDocument('---\ntitle: T\n---\n');
+    expect(
+      applyCommand(withNewline, {
+        type: 'insertFirst',
+        node: withNewline.root,
+        text: 'First note',
+      }).document.source,
+    ).toBe('---\ntitle: T\n---\n# First note\n');
+
+    const withoutNewline = buildDocument('---\ntitle: T\n---');
+    expect(
+      applyCommand(withoutNewline, {
+        type: 'insertFirst',
+        node: withoutNewline.root,
+        text: 'First note',
+      }).document.source,
+    ).toBe('---\ntitle: T\n---\n# First note');
+  });
+
+  it('[TC-1-8-23] rejects a first heading on a populated root or an empty label', () => {
+    const titled = buildDocument('# A\n');
+    expect(() =>
+      applyCommand(titled, { type: 'insertFirst', node: titled.root, text: 'B' }),
+    ).toThrowError(EditError);
+
+    const empty = buildDocument('');
+    expect(() =>
+      applyCommand(empty, { type: 'insertFirst', node: empty.root, text: '  ' }),
+    ).toThrowError(EditError);
+  });
+
+  it('[TC-1-8-24] edits and adds a child after the first heading', () => {
+    const doc = buildDocument('');
+    const first = applyCommand(doc, { type: 'insertFirst', node: doc.root, text: 'A' });
+    const renamed = applyCommand(first.document, {
+      type: 'setLabel',
+      node: first.document.root,
+      text: 'B',
+    });
+    expect(renamed.document.source).toBe('# B');
+
+    const child = applyCommand(renamed.document, {
+      type: 'insertChild',
+      node: renamed.document.root,
+      text: 'C',
+    });
+    expect(child.document.source).toBe('# B\n## C');
+  });
 });
 
 describe('splices', () => {

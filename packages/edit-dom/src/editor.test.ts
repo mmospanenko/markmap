@@ -592,7 +592,11 @@ describe('MarkmapEditor edges', () => {
 
   it('[TC-2-13-19] ignores a prevented key', () => {
     const { container, editor } = setup();
-    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    });
     event.preventDefault();
     container.dispatchEvent(event);
     expect(editor.source).toBe('- a\n- b\n');
@@ -666,6 +670,85 @@ describe('createEditView', () => {
     expect(mm.toggle).toHaveBeenCalledWith('a');
     expect(mm.focusNode).toHaveBeenCalledWith('a', { animate: false });
     expect(mm.on).toHaveBeenCalledWith('render', expect.any(Function));
+  });
+});
+
+describe('Empty document', () => {
+  it('[TC-2-14-1] types the first heading', () => {
+    const { container, editor, changes } = setup('');
+    expect(editor.selected).toBe(editor.document.root);
+
+    key(container, 'F');
+    expect(field(container).value).toBe('F');
+    expect(editor.source).toBe('');
+
+    editor.commit();
+    expect(editor.source).toBe('# F');
+    expect(editor.selected).toBe(editor.document.root);
+    expect(changes.at(-1)?.source).toBe('# F');
+  });
+
+  it('[TC-2-14-2] cancels the first label without a change', () => {
+    const { container, editor, changes } = setup('');
+    key(container, 'F2');
+    expect(editor.isEditing).toBe(true);
+    key(field(container), 'Escape');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('');
+    expect(changes).toHaveLength(0);
+  });
+
+  it('[TC-2-14-3] opens the first label with Enter and adds a child after it', () => {
+    const { container, editor } = setup('', { placeholder: '\u200B' });
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    type(container, 'First note');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# First note\n## \u200B');
+    expect(editor.isEditing).toBe(true);
+    key(field(container), 'Escape');
+  });
+
+  it('[TC-2-14-4] undoes the first heading and keeps the root selected', () => {
+    const { container, editor } = setup('');
+    key(container, 'F2');
+    type(container, 'First note');
+    editor.commit();
+    expect(editor.source).toBe('# First note');
+
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('');
+    expect(editor.selected).toBe(editor.document.root);
+    key(container, 'N');
+    expect(field(container).value).toBe('N');
+  });
+
+  it('[TC-2-14-5] keeps a promoted root selected after a rename', () => {
+    const { container, editor } = setup('# A\n');
+    key(container, 'F2');
+    type(container, 'B');
+    editor.commit();
+    expect(editor.source).toBe('# B\n');
+    expect(editor.selected).toBe(editor.document.root);
+  });
+
+  it('[TC-2-14-6] hides the empty frame and ignores Delete', () => {
+    const { container, editor, errors } = setup('');
+    expect(container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'none',
+    );
+
+    key(container, 'Backspace');
+    expect(errors).toHaveLength(0);
+    expect(editor.source).toBe('');
+  });
+
+  it('[TC-2-14-7] appends the first heading after frontmatter', () => {
+    const { container, editor } = setup('---\ntitle: T\n---\n');
+    key(container, 'F2');
+    type(container, 'First note');
+    editor.commit();
+    expect(editor.source).toBe('---\ntitle: T\n---\n# First note\n');
   });
 });
 

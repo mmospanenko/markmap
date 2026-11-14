@@ -44,6 +44,7 @@ interface Editing {
   nodeId: string;
   original: string;
   blank: boolean;
+  first: boolean;
   field: HTMLTextAreaElement;
 }
 
@@ -166,15 +167,16 @@ export class MarkmapEditor {
       if (this.commitEditing() === 'error') return;
     }
     const node = this.doc.nodes.get(nodeId);
-    if (!node?.label) return;
+    const first = this.isEmptyRoot(node);
+    if (!node || (!node.label && !first)) return;
     const rect = this.view.screenRect(nodeId);
     if (!rect) return;
-    const label = labelText(this.doc, node);
-    const blank = label === EMPTY_LABEL;
+    const label = node.label ? labelText(this.doc, node) : '';
+    const blank = first || label === EMPTY_LABEL;
     const text = initialText ?? (blank ? '' : label);
     this.field.value = text;
     this.field.style.display = 'block';
-    this.editing = { nodeId, original: label, blank, field: this.field };
+    this.editing = { nodeId, original: label, blank, first, field: this.field };
     this.paintEditing();
     this.positionEditing();
     this.paintSelection();
@@ -285,6 +287,7 @@ export class MarkmapEditor {
       case 'Delete':
       case 'Backspace':
         event.preventDefault();
+        if (this.isEmptyRoot(this.selectedNode())) return;
         this.runSelected({ type: 'delete' });
         return;
       case 'F2':
@@ -351,6 +354,15 @@ export class MarkmapEditor {
   private insertAndEdit(kind: 'insertSibling' | 'insertChild'): void {
     const id = this.selectedId;
     if (!id) return;
+    const node = this.doc.nodes.get(id);
+    if (!node) return;
+    if (kind === 'insertSibling' && node.kind === 'root') {
+      if (this.isEmptyRoot(node)) {
+        this.startEditing(id, '', { selectAll: true });
+        return;
+      }
+      kind = 'insertChild';
+    }
     const result = this.run({ type: kind, node: id, text: this.placeholder });
     if (!result) return;
     const created = nodeAtOffset(result.document, result.selection);
@@ -403,7 +415,9 @@ export class MarkmapEditor {
       return 'none';
     }
     const before = this.snapshot();
-    const result = this.apply({ type: 'setLabel', node: editing.nodeId, text });
+    const result = editing.first
+      ? this.apply({ type: 'insertFirst', node: editing.nodeId, text })
+      : this.apply({ type: 'setLabel', node: editing.nodeId, text });
     if (!result) return 'error';
     if (options.history !== false) this.history.push(before);
     this.stopEditingUi();
@@ -425,7 +439,11 @@ export class MarkmapEditor {
       if (result || state === 'changed') this.history.push(before);
       return;
     }
-    const result = this.apply({ type: kind, node: node.id, text: this.placeholder });
+    const result = this.apply({
+      type: kind === 'insertSibling' && node.kind === 'root' ? 'insertChild' : kind,
+      node: node.id,
+      text: this.placeholder,
+    });
     if (result || state === 'changed') this.history.push(before);
     if (!result) return;
     const created = nodeAtOffset(result.document, result.selection);
@@ -497,7 +515,8 @@ export class MarkmapEditor {
   private selectAt(offset: number, options: { reveal?: boolean } = {}): void {
     this.selectionOffset = offset;
     const node = nodeAtOffset(this.doc, offset);
-    this.select(node?.id ?? null, options);
+    const fallback = this.doc.nodes.size === 1 ? this.doc.root : null;
+    this.select(node?.id ?? fallback, options);
   }
 
   private select(id: string | null, options: { reveal?: boolean } = {}): void {
@@ -531,6 +550,10 @@ export class MarkmapEditor {
     if (!node) return '';
     const label = labelText(this.doc, node);
     return label === EMPTY_LABEL ? '' : label;
+  }
+
+  private isEmptyRoot(node: EditNode | undefined): boolean {
+    return node?.kind === 'root' && !node.block && !node.label && this.doc.nodes.size === 1;
   }
 
   private snapshot(): HistoryEntry {
@@ -579,6 +602,11 @@ export class MarkmapEditor {
       element.classList.remove('mm-editor-selected');
     });
     if (!this.selectedId) {
+      this.selectionBox.style.display = 'none';
+      return;
+    }
+    const selected = this.doc.nodes.get(this.selectedId);
+    if (!this.editing && this.isEmptyRoot(selected)) {
       this.selectionBox.style.display = 'none';
       return;
     }
