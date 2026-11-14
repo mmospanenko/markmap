@@ -14,5 +14,22 @@ export default defineConfig({
   test: {
     include: ['packages/*/src/**/*.test.ts'],
     passWithNoTests: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html'],
+      include: [
+        'packages/model/src/**/*.ts',
+        'packages/edit/src/**/*.ts',
+        'packages/edit-dom/src/**/*.ts',
+        'packages/parse/src/to-tree.ts',
+      ],
+      exclude: ['**/*.test.ts'],
+      thresholds: {
+        lines: 98,
+        statements: 95,
+        functions: 100,
+        branches: 89,
+      },
+    },
   },
 });

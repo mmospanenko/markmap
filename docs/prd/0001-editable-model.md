@@ -18,26 +18,29 @@ The projection is a validated snapshot of the tree over the original text. Comma
 - [REQ-1-8] Commands shall handle end of file, frontmatter, ordered lists, multi-line labels and invalid labels, and a failed command shall leave the input document unchanged.
 - [REQ-1-9] A command shall not change bytes outside its edit ranges.
 - [REQ-1-10] The splice engine shall apply non-overlapping edits and map source offsets through them.
+- [REQ-1-11] Formatting helpers shall insert, indent, dedent and place blocks at line boundaries.
 
 ## Acceptance tests
 
 Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the case number. `scripts/check-trace.mjs` verifies coverage in both directions.
 
-| Requirement | Tests                        |
-| ----------- | ---------------------------- |
-| REQ-1-1     | TC-1-1-1, TC-1-1-2, TC-1-1-3 |
-| REQ-1-2     | TC-1-2-1 ... TC-1-2-9        |
-| REQ-1-3     | TC-1-3-1 ... TC-1-3-7        |
-| REQ-1-4     | TC-1-4-1                     |
-| REQ-1-5     | TC-1-5-1 ... TC-1-5-4        |
-| REQ-1-6     | TC-1-6-1                     |
-| REQ-1-7     | TC-1-7-1                     |
-| REQ-1-8     | TC-1-8-1 ... TC-1-8-14       |
-| REQ-1-9     | TC-1-9-1                     |
-| REQ-1-10    | TC-1-10-1, TC-1-10-2         |
+| Requirement | Tests                   |
+| ----------- | ----------------------- |
+| REQ-1-1     | TC-1-1-1 ... TC-1-1-4   |
+| REQ-1-2     | TC-1-2-1 ... TC-1-2-21  |
+| REQ-1-3     | TC-1-3-1 ... TC-1-3-7   |
+| REQ-1-4     | TC-1-4-1                |
+| REQ-1-5     | TC-1-5-1 ... TC-1-5-4   |
+| REQ-1-6     | TC-1-6-1                |
+| REQ-1-7     | TC-1-7-1                |
+| REQ-1-8     | TC-1-8-1 ... TC-1-8-20  |
+| REQ-1-9     | TC-1-9-1                |
+| REQ-1-10    | TC-1-10-1 ... TC-1-10-5 |
+| REQ-1-11    | TC-1-11-1 ... TC-1-11-4 |
 
 ## Out of scope
 
-- The DOM editing layer: overlay editor, keyboard binding, selection highlight and undo. It consumes this library and lands separately.
-- Clipboard, drag and drop, multi-select, and saving fold state to Markdown.
+- Clipboard, drag and drop, multi-select, saving fold state to Markdown.
 - Publishing the fork to npm.
+
+The DOM layer is specified in [PRD-2](0002-dom-editor.md).

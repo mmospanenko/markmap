@@ -107,6 +107,13 @@ describe('parse', () => {
     expect(heading.source).toEqual({ block: { start: 5, end: 6 } });
   });
 
+  it('[TC-1-1-4] drops inline HTML and reads a directive', () => {
+    const { root } = parse('- <b>x</b>\n\n- x <!-- markmap: fold -->\n');
+    expect(toPlainText(root.children[0].content)).toBe('x');
+    expect(root.children[1].data.fold).toBe(true);
+    expect(toPlainText(root.children[1].content)).toBe('x');
+  });
+
   it('keeps ids stable when unrelated content changes', () => {
     const before = parse('# T\n\n## A\n\n- x\n\n## B\n\n- y').root;
     const after = parse('# Renamed\n\n## New\n\n## A\n\nNote.\n\n- x\n\n## B\n\n- y').root;

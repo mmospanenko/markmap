@@ -5,6 +5,7 @@
     { "path": "./packages/parse" },
     { "path": "./packages/model" },
     { "path": "./packages/edit" },
+    { "path": "./packages/edit-dom" },
     { "path": "./packages/render" },
     { "path": "./packages/view" },
     { "path": "./packages/plugin-math" },

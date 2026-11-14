@@ -8,6 +8,7 @@ English is the repository language for code, tests, docs and commits. Chat repli
 
 - `packages/model` (`@markmap/model`): parse a document, build an immutable editable snapshot with source ranges, validate it, expose node capabilities and return the render tree.
 - `packages/edit` (`@markmap/edit`): turn a command into non-overlapping splices, apply them, parse the result, validate it, check the shape and return the next snapshot, render tree and selection offset.
+- `packages/edit-dom` (`@markmap/edit-dom`): selection, keyboard, overlay field, undo and fold preservation over a live `Markmap` view.
 - `packages/core` and `packages/parse` carry only the source ranges needed by the model.
 
 ## Commands
@@ -16,12 +17,14 @@ The lockfile is pnpm 12. Use `npx` when the global pnpm is older.
 
 ```bash
 npx -y pnpm@12 install
+pnpm dev
 node_modules/.bin/vitest --run
-node_modules/.bin/tsc -p tsconfig.test.json
-node_modules/.bin/tsc -b
-node_modules/.bin/oxlint
-node_modules/.bin/oxfmt
+pnpm test:coverage
+pnpm typecheck
+pnpm lint
+pnpm fmt:check
 node scripts/check-trace.mjs
+pnpm verify
 ```
 
 Run tests against sources, not stale builds. The Vitest config maps `@markmap/*` to `packages/*/src/index.ts`.
@@ -32,6 +35,7 @@ Run tests against sources, not stale builds. The Vitest config maps `@markmap/*`
 Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
          -> @markmap/model -> validated Document snapshot
          -> @markmap/edit  -> splices -> parse -> validate -> next snapshot
+         -> @markmap/edit-dom -> selection, keyboard, overlay, history
          -> @markmap/render/view (unchanged)
 ```
 
@@ -39,6 +43,7 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 - A command returns splices and a selection offset. It never serializes the tree.
 - `parseDocument(source)` returns `{ document, tree, frontmatter }`. The tree is the render input.
 - `applyCommand(document, command)` returns `{ document, tree, edits, selection }`.
+- `MarkmapEditor` takes an `EditView`, a container and the source. `createEditView(mm)` adapts a `Markmap`.
 - A failed command throws `EditError` and leaves the input snapshot untouched.
 - Selection is a source offset, because node ids are content hashes and change on rename.
 
@@ -49,19 +54,24 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 - Keep changes to `core`, `parse`, `render` and `view` minimal and upstream-friendly. New behavior belongs in `model` and `edit`.
 - Do not publish under the `@markmap/*` scope. The fork is consumed through git.
 - Do not write comments in code. Tests and docs carry the explanation.
-- Every behavior test carries a `[TC-1-N-K]` name and maps to a `[REQ-1-N]` in `docs/prd/0001-editable-model.md`.
+- Every behavior test carries a `[TC-N-M-K]` name and maps to a `[REQ-N-M]` in `docs/prd`.
 - Run `node scripts/check-trace.mjs` after adding or renaming a test or requirement.
 - Mixed or unsupported structures are opaque and reject structural commands. Do not guess a structure for them.
 - Preserve the document line ending style and every byte outside the edit ranges.
+- Keep the overlay field outside the SVG. Position it from `screenRect`, hide the node text with a class and replay classes after every render.
+- Markmap does not parse an empty nested list item. New nodes use the placeholder label and select it for typing.
+- The view is read-only: never patch `@markmap/view` for editor behavior. Use the `EditView` contract.
 
 ## Workflow
 
-1. Read `docs/index.yml`, the PRD and the ADRs.
+1. Read `docs/index.yml`, the PRDs and the ADRs.
 2. Add or change a requirement in `docs/prd` before changing behavior.
-3. Write a failing test with a `[TC-1-N-K]` name.
+3. Write a failing test with a `[TC-N-M-K]` name.
 4. Implement the smallest change that passes.
-5. Run `vitest`, `tsc`, `oxlint`, `oxfmt` and the trace check.
+5. Run `pnpm verify`. For view or editor changes, also walk the browser checklist in `docs/process/testing.md`.
 6. Update the PRD acceptance table and the ADR when a decision changes.
+
+Process documents: `docs/process/sdlc.md`, `docs/process/testing.md`, `docs/process/bugs.md`, `docs/process/checks.md`.
 
 ## Markmap facts
 
@@ -70,5 +80,7 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 - This fork adds `source.label` and `source.block`. A heading block ends at the next heading with an equal or lower level, or at the end of the document.
 - Node ids are hashes of the parent id and the node text. A rename changes the id of the node and its descendants.
 - `@markmap/view` renders text primitives. It has no per-node editable DOM.
+- `screenRect(id)`, `hitAt(x, y)` and `layoutPoint(clientX, clientY)` connect the editor to the view.
 - `setTree(root, options)` keeps folds for ids that still exist.
 - Fold state is not persisted to Markdown. `<!-- markmap: fold -->` is read, not written.
+- Empty nested list items are not parsed; the editor inserts a placeholder label instead.

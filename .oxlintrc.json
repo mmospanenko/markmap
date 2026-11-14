@@ -11,5 +11,5 @@
     "browser": true,
     "node": true
   },
-  "ignorePatterns": ["**/dist/**"]
+  "ignorePatterns": ["**/dist/**", "**/coverage/**"]
 }

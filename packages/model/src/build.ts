@@ -18,7 +18,7 @@ export function buildDocument(source: string): Document {
   return parseDocument(source).document;
 }
 
-function buildFromTree(source: string, root: MarkmapNode): Document {
+export function buildFromTree(source: string, root: MarkmapNode): Document {
   const nodes = new Map<string, EditNode>();
   const order: string[] = [];
 

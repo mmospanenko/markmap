@@ -11,7 +11,9 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "test": "vitest --run",
+    "test:coverage": "vitest --run --coverage",
     "check:trace": "node scripts/check-trace.mjs",
+    "verify": "pnpm check:trace && pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm build:types && pnpm build:js && pnpm test:coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "clean": "pnpm -r clean",
     "build:types": "tsc -b",
@@ -23,6 +25,8 @@
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
     "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "5.1.0",
+    "happy-dom": "21.0.4",
     "oxfmt": "^0.76.0",
     "oxlint": "^1.91.0",
     "typescript": "^7.0.2",

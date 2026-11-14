@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - master
+      - 'feat/**'
   pull_request:
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -17,4 +18,5 @@ jobs:
           version: 12
           runtime: node@26
           cache: true
-      - run: pnpm build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify

@@ -1,5 +1,6 @@
 import {
   buildDocument,
+  buildFromTree,
   labelText,
   validateDocument,
   type Document,
@@ -181,6 +182,74 @@ describe('edit edges', () => {
     expect(
       run('- a\n\t- b\n- c\n', 'b', (n) => ({ type: 'outdent', node: n.id })).document.source,
     ).toBe('- a\n- b\n- c\n');
+  });
+
+  it('[TC-1-8-15] rejects unknown nodes and unsupported commands', () => {
+    const doc = buildDocument('- a\n');
+    expect(() => applyCommand(doc, { type: 'delete', node: 'missing' })).toThrowError(/No node/);
+    expect(() => applyCommand(doc, { type: 'setLabel', node: doc.root, text: 'x' })).toThrowError(
+      EditError,
+    );
+    const opaque = buildDocument('- # T\n');
+    expect(() =>
+      applyCommand(opaque, { type: 'insertChild', node: find(opaque, 'T').id, text: 'x' }),
+    ).toThrowError(EditError);
+    expect(() => applyCommand(doc, { type: 'toggleCheck', node: find(doc, 'a').id })).toThrowError(
+      EditError,
+    );
+  });
+
+  it('[TC-1-8-16] inserts into an empty and a titled root', () => {
+    const empty = buildDocument('');
+    const first = applyCommand(empty, { type: 'insertChild', node: empty.root, text: 'A' });
+    expect(first.document.source).toBe('- A');
+
+    const titled = buildDocument('---\ntitle: T\n---\n\n# A\n');
+    const second = applyCommand(titled, { type: 'insertChild', node: titled.root, text: 'B' });
+    expect(second.document.source).toBe('---\ntitle: T\n---\n\n# A\n# B\n');
+  });
+
+  it('[TC-1-8-17] deletes a CRLF item at end of file', () => {
+    const doc = buildDocument('- a\r\n- b\r\n');
+    const result = applyCommand(doc, { type: 'delete', node: find(doc, 'b').id });
+    expect(result.document.source).toBe('- a\r\n');
+  });
+
+  it('[TC-1-8-18] inserts a child next to existing children', () => {
+    const doc = buildDocument('- a\n  - b\n- c\n');
+    const result = applyCommand(doc, {
+      type: 'insertChild',
+      node: find(doc, 'a').id,
+      text: 'd',
+    });
+    expect(result.document.source).toBe('- a\n  - b\n  - d\n- c\n');
+  });
+
+  it('[TC-1-8-19] uses the list branch for a level-six root', () => {
+    const tree = {
+      id: 'root',
+      type: 'root',
+      content: [],
+      notes: [],
+      data: { depth: 6 },
+      source: { block: { start: 0, end: 7 } },
+      children: [],
+    };
+    const doc = buildFromTree('###### A', tree);
+    expect(() => applyCommand(doc, { type: 'insertChild', node: 'root', text: 'B' })).toThrowError(
+      EditError,
+    );
+  });
+
+  it('[TC-1-8-20] rejects structure-changing insert labels', () => {
+    const doc = buildDocument('- a\n- b\n');
+    const a = find(doc, 'a').id;
+    expect(() =>
+      applyCommand(doc, { type: 'insertSibling', node: a, text: 'one\n- two' }),
+    ).toThrowError(EditError);
+    expect(() => applyCommand(doc, { type: 'insertSibling', node: a, text: '# two' })).toThrowError(
+      EditError,
+    );
   });
 });
 

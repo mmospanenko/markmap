@@ -20,6 +20,7 @@ The tree is plain data, so it can be stored or sent anywhere. Primitives are a s
 | `@markmap/parse`       | Markdown to a tree                                  |
 | `@markmap/model`       | Validated editable projection with source ranges    |
 | `@markmap/edit`        | Source-preserving commands and splices              |
+| `@markmap/edit-dom`    | Selection, keyboard, overlay field and history      |
 | `@markmap/render`      | Measuring, layouts, themes, primitives, SVG strings |
 | `@markmap/view`        | Zoom, pan, folding, animation and hit testing       |
 | `@markmap/canvas`      | Canvas backend and PNG export                       |
@@ -32,7 +33,7 @@ The tree is plain data, so it can be stored or sent anywhere. Primitives are a s
 
 `core`, `parse` and `render` need no DOM.
 
-The editable projection is additive. `@markmap/model` builds an immutable snapshot from the same parse result and validates it against the source. `@markmap/edit` turns a command into non-overlapping splices, re-parses the text and returns the next snapshot and render tree. The renderer never sees a custom format.
+The editable projection is additive. `@markmap/model` builds an immutable snapshot from the same parse result and validates it against the source. `@markmap/edit` turns a command into non-overlapping splices, re-parses the text and returns the next snapshot and render tree. `@markmap/edit-dom` binds the commands to a live view with an overlay field, selection, keyboard and history. The renderer never sees a custom format.
 
 ## Extension points
 

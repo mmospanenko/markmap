@@ -1,5 +1,6 @@
 node_modules
 *.log
+coverage
 packages/*/dist
 packages/*/coverage
 *.tsbuildinfo

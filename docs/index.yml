@@ -2,6 +2,12 @@ documents:
   - id: PRD-1
     title: Editable Markmap model
     path: prd/0001-editable-model.md
+  - id: PRD-2
+    title: Keyboard editor over a Markmap view
+    path: prd/0002-dom-editor.md
   - id: ADR-1
     title: Source-preserving edits over a validated model
     path: adr/0001-source-preserving-edits.md
+  - id: ADR-2
+    title: A keyboard editor as an overlay over the SVG
+    path: adr/0002-dom-editor.md

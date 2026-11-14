@@ -21,14 +21,17 @@ Headings and list items become branches you can fold, zoom and pan. Other text, 
 
 This internal fork keeps the renderer packages unchanged and adds a source-preserving editing layer:
 
-| Package          | What it does                                                      |
-| ---------------- | ----------------------------------------------------------------- |
-| `@markmap/model` | Validated editable projection of a Markmap tree over its Markdown |
-| `@markmap/edit`  | Commands that return splices and a selection offset               |
+| Package             | What it does                                                      |
+| ------------------- | ----------------------------------------------------------------- |
+| `@markmap/model`    | Validated editable projection of a Markmap tree over its Markdown |
+| `@markmap/edit`     | Commands that return splices and a selection offset               |
+| `@markmap/edit-dom` | Selection, keyboard, overlay field and history for a live map     |
 
 ```js
 import { parseDocument } from '@markmap/model';
 import { applyCommand } from '@markmap/edit';
+import { MarkmapEditor, createEditView } from '@markmap/edit-dom';
+import { Markmap } from '@markmap/view';
 
 const parsed = parseDocument('# Trip\n\n- Pack\n');
 const pack = parsed.document.nodes.get(parsed.document.order[1]);
@@ -38,11 +41,19 @@ const result = applyCommand(parsed.document, {
   text: 'Book flights',
 });
 
+const mm = Markmap.create(svg, parsed.tree);
+const editor = new MarkmapEditor({
+  source: parsed.document.source,
+  view: createEditView(mm),
+  container,
+  onChange: (change) => console.log(change.source),
+});
+
 result.document.source;
 result.tree;
 ```
 
-Markdown stays the source of truth. A command changes only its own range, then the next snapshot is parsed and validated. The fork is consumed through git and is not published to npm.
+Run `pnpm dev` and open `/editor.html` for the keyboard playground. Markdown stays the source of truth. A command changes only its own range, then the next snapshot is parsed and validated. The fork is consumed through git and is not published to npm.
 
 ## Where to use it
 
@@ -125,6 +136,7 @@ This writes `notes.html`, one file that works offline, and opens it. Use `--svg`
 | `@markmap/parse`       | Markdown to a tree                 |
 | `@markmap/model`       | Validated editable projection      |
 | `@markmap/edit`        | Source-preserving edit commands    |
+| `@markmap/edit-dom`    | Keyboard editor over the view      |
 | `@markmap/render`      | Layouts, themes and SVG output     |
 | `@markmap/view`        | The interactive map                |
 | `@markmap/canvas`      | Canvas renderer and PNG export     |
