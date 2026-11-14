@@ -453,7 +453,7 @@ export class MarkmapEditor {
     const field = editing.field;
     const scale = this.view.scale;
     const fontSize = Number.parseFloat(getComputedStyle(field).fontSize) || 16;
-    const textWidth = field.value.length * fontSize * 0.65 + 16;
+    const textWidth = field.value.length * fontSize * 0.85 + 16;
     const width = Math.max(rect.width / scale, textWidth, 40);
     field.style.left = `${rect.x - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
