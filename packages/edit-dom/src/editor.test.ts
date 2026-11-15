@@ -16,6 +16,7 @@ class FakeView implements EditView {
   focused: string[] = [];
   rects = new Map<string, Rect | undefined>();
   directions = new Map<string, Side>();
+  defaultDirection: Side | undefined;
   private listeners = new Map<string, Set<() => void>>();
 
   get foldedIds(): ReadonlySet<string> {
@@ -53,7 +54,7 @@ class FakeView implements EditView {
   }
 
   direction(id: string): Side | undefined {
-    return this.directions.get(id);
+    return this.directions.get(id) ?? this.defaultDirection;
   }
 
   hitAt(): { kind: string; nodeId?: string } | undefined {
@@ -129,6 +130,11 @@ function type(container: HTMLElement, value: string) {
   const element = field(container);
   element.value = value;
   element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function treeLabel(node: MarkmapNode | undefined): string {
+  if (!node) return '';
+  return node.content.map((item) => ('value' in item ? item.value : '')).join('');
 }
 
 afterEach(() => {
@@ -414,7 +420,7 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-15-2] grows an end-aligned field to the left', () => {
     const { container, view, editor } = setup();
-    view.directions.set(nodeId(editor, 'a'), 'left');
+    view.defaultDirection = 'left';
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, 'F2');
     type(container, 'a much longer label');
@@ -426,7 +432,7 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-15-3] grows a centered field from its center', () => {
     const { container, view, editor } = setup();
-    view.directions.set(nodeId(editor, 'a'), 'top');
+    view.defaultDirection = 'top';
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, 'F2');
     type(container, 'a much longer label');
@@ -456,6 +462,68 @@ describe('MarkmapEditor', () => {
     editor.commit();
     expect(editor.source).toBe('- c\n- b\n');
     expect(editor.isEditing).toBe(false);
+  });
+
+  it('[TC-2-16-1] previews the label in the view while typing', () => {
+    const { container, view, editor, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    expect(treeLabel(view.tree?.children[0])).toBe('a much longer label');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(changes).toHaveLength(0);
+  });
+
+  it('[TC-2-16-2] restores the layout when editing is cancelled', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    key(field(container), 'Escape');
+    expect(treeLabel(view.tree?.children[0])).toBe('a');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-16-3] keeps one change after previewing a label', () => {
+    const { container, view, editor, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    editor.commit();
+    expect(editor.source).toBe('- a much longer label\n- b\n');
+    expect(changes).toHaveLength(1);
+    expect(treeLabel(view.tree?.children[0])).toBe('a much longer label');
+  });
+
+  it('[TC-2-16-4] restores the preview when the text returns to the original', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    type(container, 'a');
+    expect(treeLabel(view.tree?.children[0])).toBe('a');
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-16-5] previews the first heading in an empty document', () => {
+    const { container, view, editor, changes } = setup('');
+    key(container, 'F2');
+    type(container, 'First note');
+    expect(treeLabel(view.tree)).toBe('First note');
+    expect(editor.source).toBe('');
+    expect(changes).toHaveLength(0);
+  });
+
+  it('[TC-2-16-6] keeps the last valid preview for an invalid label', () => {
+    const { container, view, editor } = setup('# a\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'ab');
+    type(container, 'a\nb');
+    expect(treeLabel(view.tree)).toBe('ab');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('# a\n');
   });
 
   it('[TC-2-9-1] keeps a fold after a rename', () => {
