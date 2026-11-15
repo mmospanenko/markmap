@@ -169,7 +169,7 @@ export class MarkmapEditor {
 
   startEditing(
     nodeId: string | null = this.selectedId,
-    options: { selectAll?: boolean } = {},
+    options: { selectAll?: boolean; initialText?: string } = {},
   ): void {
     if (!nodeId) return;
     if (this.editing) {
@@ -195,7 +195,7 @@ export class MarkmapEditor {
     if (!rect) return;
     const label = node.label ? labelText(this.doc, node) : '';
     const blank = first || label === EMPTY_LABEL;
-    const text = blank ? '' : label;
+    const text = options.initialText ?? (blank ? '' : label);
     this.field.value = text;
     this.field.style.display = 'block';
     this.editing = {
@@ -209,12 +209,37 @@ export class MarkmapEditor {
       field: this.field,
     };
     this.setMode(true);
+    if (options.initialText !== undefined) this.previewEditing();
     this.paintEditing();
     this.positionEditing();
     this.paintSelection();
     this.field.focus({ preventScroll: true });
     if (options.selectAll) this.field.select();
     else this.field.setSelectionRange(text.length, text.length);
+  }
+
+  commitForSnapshot(): string {
+    const editing = this.editing;
+    if (!editing) return this.doc.source;
+    const text = editing.field.value;
+    if (text === editing.original || (editing.blank && text === '')) return this.doc.source;
+    const before = this.snapshot();
+    const result = editing.first
+      ? this.apply({ type: 'insertFirst', node: editing.nodeId, text })
+      : this.apply({ type: 'setLabel', node: editing.nodeId, text });
+    if (!result) return this.doc.source;
+    this.history.push(before);
+    const target = nodeAtOffset(result.document, result.selection);
+    if (target) {
+      editing.nodeId = target.id;
+      editing.previewId = target.id;
+    }
+    editing.original = text;
+    editing.blank = false;
+    editing.first = false;
+    editing.preview = false;
+    editing.folds = [...this.view.foldedIds];
+    return this.doc.source;
   }
 
   setLabel(nodeId: string, text: string): boolean {
@@ -349,6 +374,12 @@ export class MarkmapEditor {
       case 'ArrowRight':
         event.preventDefault();
         this.navigate(event.key);
+        return;
+      default:
+        if (event.altKey || mod || event.key.length !== 1) return;
+        if (!this.isEmptyLabel(this.selectedNode())) return;
+        event.preventDefault();
+        this.startEditing(this.selectedId, { initialText: event.key });
     }
   };
 
@@ -685,6 +716,12 @@ export class MarkmapEditor {
       !node.label &&
       this.doc.nodes.size === 1 &&
       !this.title
+    );
+  }
+
+  private isEmptyLabel(node: EditNode | undefined): boolean {
+    return (
+      this.isEmptyRoot(node) || (node !== undefined && labelText(this.doc, node) === EMPTY_LABEL)
     );
   }
 

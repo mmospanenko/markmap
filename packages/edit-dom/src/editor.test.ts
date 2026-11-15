@@ -217,6 +217,21 @@ describe('MarkmapEditor', () => {
     expect(field(container).value).toBe('New topic');
   });
 
+  it('[TC-2-17-8] starts editing with the first typed character on an empty node', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Tab');
+    const emptyId = editor.selected;
+    key(field(container), 'Escape');
+
+    key(container, 'x');
+
+    expect(editor.selected).toBe(emptyId);
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('x');
+    expect(editor.source).toBe('- a\n  - \u200B\n- b\n');
+  });
+
   it('[TC-2-2-3] inserts a child with Tab', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
@@ -593,6 +608,36 @@ describe('MarkmapEditor', () => {
     expect(editor.source).toBe('# a\n');
   });
 
+  it('[TC-2-18-1] snapshots the current label without leaving editing', () => {
+    const { container, view, editor, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'a revised label');
+
+    expect(editor.commitForSnapshot()).toBe('- a revised label\n- b\n');
+    expect(changes.at(-1)?.source).toBe('- a revised label\n- b\n');
+    expect(editor.isEditing).toBe(true);
+    expect(container.classList.contains('mm-editor-mode-edit')).toBe(true);
+    expect(field(container).value).toBe('a revised label');
+    expect(document.activeElement).toBe(field(container));
+
+    type(container, 'a revised label continued');
+    expect(editor.source).toBe('- a revised label\n- b\n');
+    expect(editor.commitForSnapshot()).toBe('- a revised label continued\n- b\n');
+    expect(changes.at(-1)?.source).toBe('- a revised label continued\n- b\n');
+    expect(editor.isEditing).toBe(true);
+  });
+
+  it('[TC-2-18-2] keeps an empty new field open during a snapshot', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Tab');
+
+    expect(editor.commitForSnapshot()).toBe('- a\n  - \u200B\n- b\n');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('');
+  });
+
   it('[TC-2-9-1] keeps a fold after a rename', () => {
     const { container, view, editor } = setup('- a\n  - a1\n- b\n');
     const a = nodeId(editor, 'a');
@@ -937,8 +982,7 @@ describe('Empty document', () => {
     const { container, editor, changes } = setup('');
     expect(editor.selected).toBe(editor.document.root);
 
-    key(container, ' ');
-    type(container, 'F');
+    key(container, 'F');
     expect(field(container).value).toBe('F');
     expect(editor.source).toBe('');
 
