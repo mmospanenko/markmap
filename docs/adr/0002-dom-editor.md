@@ -21,13 +21,14 @@ The editor:
 - highlights the selection with a class on the group;
 - replays selection and editing classes after every render;
 - maps the keyboard to `@markmap/edit` commands;
-- keeps selection and editing as explicit modes: Space or a double click opens the field, Escape returns to selection, and printable keys do not edit;
+- keeps selection and editing as explicit modes: Space or a double click opens the field, Escape returns to selection, printable keys on non-empty selected nodes do nothing, and typing on an empty selected node starts editing with that character;
 - keeps history as source snapshots and restores folds by id.
 
 ## Consequences
 
 - The renderer stays untouched and the editor is testable with a fake view in happy-dom.
 - Typing changes only the preview tree. The document changes on commit, and cancelling restores the original tree and folds.
+- A host snapshot commits the preview into the source while leaving the field, focus and edit mode active.
 - The host gives the container a size and, when needed, the editor sets `position: relative` and restores it on destroy.
 - The field styling is approximate: it inherits the host font and uses a small default padding. A host can override the field class.
 - Empty nested list items are not parsed by Markmap. The editor inserts a placeholder label instead.
