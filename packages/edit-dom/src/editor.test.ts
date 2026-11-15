@@ -371,10 +371,12 @@ describe('MarkmapEditor', () => {
     expect(editor.selected).toBe(nodeId(editor, 'a1'));
   });
 
-  it('[TC-2-17-1] leaves F2 unbound in selection mode', () => {
+  it('[TC-2-17-1] leaves F2 and modified Space unbound in selection mode', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, 'F2');
+    expect(editor.isEditing).toBe(false);
+    key(container, ' ', { metaKey: true });
     expect(editor.isEditing).toBe(false);
     expect(editor.source).toBe('- a\n- b\n');
   });

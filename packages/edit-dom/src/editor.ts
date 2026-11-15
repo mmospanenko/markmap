@@ -336,6 +336,7 @@ export class MarkmapEditor {
         this.runSelected({ type: 'delete' });
         return;
       case ' ':
+        if (event.altKey || mod || event.shiftKey) return;
         event.preventDefault();
         this.startEditing();
         return;
