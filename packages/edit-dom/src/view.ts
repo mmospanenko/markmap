@@ -16,6 +16,7 @@ export function createEditView(mm: Markmap): EditView {
     toggle: (id) => mm.toggle(id),
     focusNode: (id, options) => mm.focusNode(id, options),
     screenRect: (id) => mm.screenRect(id),
+    direction: (id) => mm.result?.layout.byId.get(id)?.direction,
     hitAt: (x, y) => mm.hitAt(x, y),
     layoutPoint: (x, y) => mm.layoutPoint(x, y),
     on: (type, listener) => mm.on(type, listener),

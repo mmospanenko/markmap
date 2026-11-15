@@ -523,11 +523,24 @@ export class MarkmapEditor {
       }, 0) + 16;
     const width = Math.max(rect.width / scale, textWidth, 40);
     const rows = field.value.split('\n').length;
-    const center = rect.x + rect.width / 2;
-    field.style.left = `${center - (width * scale) / 2 - box.x}px`;
+    const direction = this.view.direction(editing.nodeId);
+    const align =
+      direction === 'left'
+        ? 'right'
+        : direction === 'top' || direction === 'bottom'
+          ? 'center'
+          : 'left';
+    const left =
+      align === 'center'
+        ? rect.x + rect.width / 2 - (width * scale) / 2
+        : align === 'right'
+          ? rect.x + rect.width - width * scale
+          : rect.x;
+    field.style.left = `${left - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
     field.style.width = `${width}px`;
     field.style.height = `${Math.max(1, rect.height / scale, rows * lineHeight)}px`;
+    field.style.textAlign = align;
     field.style.transform = `scale(${scale})`;
   }
 

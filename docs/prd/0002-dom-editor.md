@@ -22,6 +22,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-12] The history shall keep the last hundred entries and expose undo and redo state.
 - [REQ-2-13] The editor shall handle boundary keys, clicks, source replacement, shared styles and repeated destruction without changing the document.
 - [REQ-2-14] When the document is empty, the editor shall open an editable first node and keep the source unchanged until its label is committed, hide the empty selection frame, and report a notice instead of editing a root label that comes from the frontmatter title.
+- [REQ-2-15] When the label grows while editing, the editor shall keep the node's text anchor fixed: a start-aligned node grows to the right, an end-aligned node grows to the left, and a centered node grows symmetrically.
 
 ## Acceptance tests
 
@@ -41,6 +42,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-12    | TC-2-12-1, TC-2-12-2     |
 | REQ-2-13    | TC-2-13-1 ... TC-2-13-22 |
 | REQ-2-14    | TC-2-14-1 ... TC-2-14-7  |
+| REQ-2-15    | TC-2-15-1 ... TC-2-15-3  |
 
 ## Decisions
 
