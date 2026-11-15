@@ -1,7 +1,15 @@
 import type { MarkmapNode } from '@markmap/core';
 import { parse } from '@markmap/parse';
 import { firstLine, HEADING_MARKER, indentWidth, lineStart, LIST_MARKER } from './source';
-import type { Capabilities, Document, EditNode, ListInfo, NodeKind, Range } from './types';
+import type {
+  Capabilities,
+  Document,
+  EditNode,
+  ListInfo,
+  NodeKind,
+  NoteRange,
+  Range,
+} from './types';
 
 export interface ParseDocumentResult {
   document: Document;
@@ -103,16 +111,36 @@ function buildNode(source: string, tree: MarkmapNode, parent: EditNode | null): 
     label,
     block,
     list,
+    notes: readNotes(tree, source.length),
     opaque,
     capabilities: emptyCapabilities(),
   };
-  node.capabilities = readCapabilities(node, parent);
+  node.capabilities = readCapabilities(node, parent, tree.content.length > 0);
   return node;
 }
 
-function readCapabilities(node: EditNode, parent: EditNode | null): Capabilities {
+function readNotes(tree: MarkmapNode, length: number): NoteRange[] {
+  const notes: NoteRange[] = [];
+  const seen = new Set<string>();
+  for (const note of tree.notes) {
+    if (!note.source) continue;
+    const range = clampRange(note.source, length);
+    const key = `${range.start}:${range.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    notes.push({ range, fence: note.fence === true });
+  }
+  return notes;
+}
+
+function readCapabilities(
+  node: EditNode,
+  parent: EditNode | null,
+  hasTitle: boolean,
+): Capabilities {
   const base: Capabilities = {
     editLabel: false,
+    editNotes: false,
     addChild: false,
     addSibling: false,
     outdent: false,
@@ -124,7 +152,12 @@ function readCapabilities(node: EditNode, parent: EditNode | null): Capabilities
     return { ...base, delete: Boolean(parent && node.block), move: Boolean(parent && node.block) };
   }
   if (node.kind === 'root') {
-    return { ...base, editLabel: Boolean(node.label && node.block), addChild: !node.opaque };
+    return {
+      ...base,
+      editLabel: Boolean(node.label && node.block),
+      editNotes: Boolean(node.block) || hasTitle,
+      addChild: !node.opaque,
+    };
   }
   if (node.opaque) {
     return { ...base, delete: Boolean(parent), move: Boolean(parent) };
@@ -133,6 +166,7 @@ function readCapabilities(node: EditNode, parent: EditNode | null): Capabilities
     return {
       ...base,
       editLabel: Boolean(node.label && node.block),
+      editNotes: true,
       addChild: node.level < 6,
       addSibling: Boolean(parent),
       outdent: parent?.kind === 'heading',
@@ -143,6 +177,7 @@ function readCapabilities(node: EditNode, parent: EditNode | null): Capabilities
   return {
     ...base,
     editLabel: Boolean(node.label && node.block),
+    editNotes: true,
     addChild: true,
     addSibling: Boolean(parent),
     outdent: parent?.kind === 'listItem',
@@ -155,6 +190,7 @@ function readCapabilities(node: EditNode, parent: EditNode | null): Capabilities
 function emptyCapabilities(): Capabilities {
   return {
     editLabel: false,
+    editNotes: false,
     addChild: false,
     addSibling: false,
     outdent: false,

@@ -148,4 +148,32 @@ describe('insert block', () => {
   it('[TC-1-12-14] rejects an empty heading converted under a list item', () => {
     expect(() => paste('- a\n', 'a', '##')).toThrowError(/did not survive/u);
   });
+
+  it('[TC-3-5-1] reindents a pasted fence with the list item block', () => {
+    const input = '- a\n- b\n\n  ```markmap-note\n  note\n  ```\n';
+    const result = paste(input, 'a', '- b\n\n  ```markmap-note\n  note\n  ```');
+    expect(result.document.source).toBe(
+      '- a\n  - b\n\n    ```markmap-note\n    note\n    ```\n- b\n\n  ```markmap-note\n  note\n  ```\n',
+    );
+    const pasted = find(result.document, 'b');
+    expect(pasted.notes.map((note) => note.fence)).toEqual([true]);
+  });
+
+  it('[TC-3-5-2] keeps a fence in a pasted heading subtree', () => {
+    const input = '# A\n\n```markmap-note\nnote a\n```\n\n# C\n';
+    const result = paste(input, 'C', '## B\n\n```markmap-note\nnote b\n```');
+    expect(result.document.source).toBe(
+      '# A\n\n```markmap-note\nnote a\n```\n\n# C\n## B\n\n```markmap-note\nnote b\n```\n',
+    );
+    expect(find(result.document, 'B').notes.map((note) => note.fence)).toEqual([true]);
+  });
+
+  it('[TC-3-5-3] reindents a fence in a heading subtree pasted under a list item', () => {
+    const input = '# A\n- a\n## B\n\n```markmap-note\nnote b\n```\n';
+    const result = paste(input, 'a', '## B\n\n```markmap-note\nnote b\n```');
+    expect(result.document.source).toBe(
+      '# A\n- a\n  - B\n\n    ```markmap-note\n    note b\n    ```\n## B\n\n```markmap-note\nnote b\n```\n',
+    );
+    expect(find(result.document, 'a').children).toHaveLength(1);
+  });
 });

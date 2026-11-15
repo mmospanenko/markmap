@@ -46,4 +46,4 @@ Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the c
 - Drag and drop, multi-select, saving fold state to Markdown.
 - Publishing the fork to npm.
 
-The DOM layer is specified in [PRD-2](0002-dom-editor.md).
+The DOM layer is specified in [PRD-2](0002-dom-editor.md). Notes editing is specified in [PRD-3](0003-notes.md).

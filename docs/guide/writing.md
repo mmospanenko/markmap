@@ -63,6 +63,24 @@ Run these in order, and stop if one fails.
 
 Notes keep the map small and leave your document whole. Code in a note is highlighted, and exported images keep the dot but not the note's content.
 
+### Note blocks
+
+A fenced block with the `markmap-note` info string is a note too, and its content is parsed on its own. Headings, lists, tables and code inside it stay inside the note and never become branches.
+
+````md
+- Release
+
+  ```markmap-note
+  Ship on a Tuesday.
+
+  - This list is part of the note
+  ```
+
+  - This is a child branch
+````
+
+Indent the fence to the node's content when the node is a list item. A paragraph note, like the ones above, still works; saving a note from the editor writes one `markmap-note` fence.
+
 ## Images
 
 `![alt](url)` loads the image to find its size. To lay it out at once, give the size with an `<img>` tag:
