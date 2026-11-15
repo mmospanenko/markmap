@@ -17,10 +17,11 @@ This layer adds one fenced block with the `markmap-note` info string. The conten
 - [REQ-3-4] The command shall insert the fence directly below a label line, or before the first child of a title root, or at the end of the source for a childless title root, without touching frontmatter; unchanged text shall produce no splices; the result shall keep the children and their order and hold exactly one fence note; an opaque node or a node with an empty label and no block shall throw `EditError`.
 - [REQ-3-5] Copy, cut and paste shall carry the fence as part of the node block, and paste shall reindent the fence for a list item.
 - [REQ-3-6] The editor shall expose `editNotes(nodeId?)` and `isEditingNotes`, commit an open label edit first, reject an opaque node or an empty label through `onError`, and open a floating notes panel with the existing fence content, the legacy slices joined by a blank line, or an empty value.
-- [REQ-3-7] The notes panel shall be a `div.mm-editor-notes` with `role="dialog"`, `aria-label="Notes"`, a toolbar and a `textarea.mm-editor-notes-field`; it shall not scale with zoom, shall sit below the node when it fits and otherwise above, shall stay inside the container, and shall reposition on render and zoom.
-- [REQ-3-8] The toolbar shall format the selection with bold, italic, inline code, link, quote and code block markers, keep the focus in the field, and use an empty selection by placing the caret between the markers.
+- [REQ-3-7] The notes panel shall be a `div.mm-editor-notes` with `role="dialog"`, `aria-label="Notes"`, a toolbar and a `textarea.mm-editor-notes-field`; it shall not scale with zoom, shall sit below the node when it fits and otherwise above, shall stay inside the container, and shall reposition on render and zoom. The panel shall carry a compact header with a note icon, the title `Notes` and a muted `Markdown` label.
+- [REQ-3-8] The toolbar shall format the selection with bold, italic, inline code, link, quote and code block markers, keep the focus in the field, and use an empty selection by placing the caret between the markers. Each toolbar button shall keep its accessible name and add a matching `title` and a 16x16 outline SVG icon.
 - [REQ-3-9] Escape shall close without a source change, Cmd/Ctrl+Enter shall commit and close, Enter shall insert a newline, Cmd/Ctrl+B and Cmd/Ctrl+I shall format, a click outside the panel shall commit and close, and clicks inside shall not select a node.
 - [REQ-3-10] A snapshot during notes editing shall apply `setNotes` when the text changed, record one history entry, update the original text, keep the panel open and focused and return the source; a second snapshot without a change shall not add an entry. Destroy shall remove the panel, its listeners and its state.
+- [REQ-3-11] The notes panel shall draw its surface, text, field, border, hover, focus and hint from the host theme tokens `--oc-elevated`, `--oc-fg`, `--oc-bg`, `--oc-border`, `--oc-hover`, `--oc-focus`, `--oc-radius` and `--oc-muted`, with theme-aware fallbacks, so it stays readable in light and dark modes.
 
 ## Acceptance tests
 
@@ -32,10 +33,11 @@ This layer adds one fenced block with the `markmap-note` info string. The conten
 | REQ-3-4     | TC-3-4-1 ... TC-3-4-8   |
 | REQ-3-5     | TC-3-5-1 ... TC-3-5-4   |
 | REQ-3-6     | TC-3-6-1 ... TC-3-6-8   |
-| REQ-3-7     | TC-3-7-1 ... TC-3-7-4   |
-| REQ-3-8     | TC-3-8-1 ... TC-3-8-7   |
+| REQ-3-7     | TC-3-7-1 ... TC-3-7-5   |
+| REQ-3-8     | TC-3-8-1 ... TC-3-8-8   |
 | REQ-3-9     | TC-3-9-1 ... TC-3-9-8   |
 | REQ-3-10    | TC-3-10-1 ... TC-3-10-5 |
+| REQ-3-11    | TC-3-11-1               |
 
 ## Decisions
 
