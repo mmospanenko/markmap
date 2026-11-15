@@ -21,6 +21,7 @@ import {
   firstLineMarker,
   formatListText,
   headingLine,
+  headingsToList,
   insertLine,
   lineEnding,
   listLine,
@@ -276,10 +277,11 @@ function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
   let moved: string;
   if (top.kind === 'heading' || top.kind === 'root') {
     if (node.kind === 'listItem') {
-      throw new EditError('E_CAPABILITY', 'A heading cannot be pasted under a list item', node.id);
+      moved = headingsToList(block, childIndent(doc, node), doc.unit, ending);
+    } else {
+      const parentLevel = node.kind === 'root' ? (node.block ? node.level : 0) : node.level;
+      moved = shiftHeadings(block, parentLevel + 1 - top.level, ending);
     }
-    const parentLevel = node.kind === 'root' ? (node.block ? node.level : 0) : node.level;
-    moved = shiftHeadings(block, parentLevel + 1 - top.level, ending);
   } else if (top.kind === 'listItem') {
     if (!top.list) throw shape('The pasted list item has no list info');
     const indent = node.kind === 'listItem' ? childIndent(doc, node) : '';

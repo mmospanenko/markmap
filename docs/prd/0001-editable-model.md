@@ -19,26 +19,26 @@ The projection is a validated snapshot of the tree over the original text. Comma
 - [REQ-1-9] A command shall not change bytes outside its edit ranges.
 - [REQ-1-10] The splice engine shall apply non-overlapping edits and map source offsets through them.
 - [REQ-1-11] Formatting helpers shall insert, indent, dedent and place blocks at line boundaries.
-- [REQ-1-12] When a Markdown block is pasted under a node, the command shall insert the whole block after the node's block, renumber heading levels or reindent list items to the child depth, keep notes and descendants, return the label selection of the pasted root, and reject a heading under a list item or a level beyond six without changing the input.
+- [REQ-1-12] When a Markdown block is pasted under a node, the command shall insert the whole block after the node's block, renumber heading levels or reindent list items to the child depth, keep notes and descendants, return the label selection of the pasted root, and reject a level beyond six without changing the input. When the target is a list item, a heading subtree shall become a list subtree with the same nodes, notes, continuation lines, and markers.
 
 ## Acceptance tests
 
 Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the case number. `scripts/check-trace.mjs` verifies coverage in both directions.
 
-| Requirement | Tests                   |
-| ----------- | ----------------------- |
-| REQ-1-1     | TC-1-1-1 ... TC-1-1-4   |
-| REQ-1-2     | TC-1-2-1 ... TC-1-2-22  |
-| REQ-1-3     | TC-1-3-1 ... TC-1-3-7   |
-| REQ-1-4     | TC-1-4-1                |
-| REQ-1-5     | TC-1-5-1 ... TC-1-5-4   |
-| REQ-1-6     | TC-1-6-1                |
-| REQ-1-7     | TC-1-7-1                |
-| REQ-1-8     | TC-1-8-1 ... TC-1-8-20  |
-| REQ-1-9     | TC-1-9-1                |
-| REQ-1-10    | TC-1-10-1 ... TC-1-10-5 |
-| REQ-1-11    | TC-1-11-1 ... TC-1-11-7 |
-| REQ-1-12    | TC-1-12-1 ... TC-1-12-9 |
+| Requirement | Tests                    |
+| ----------- | ------------------------ |
+| REQ-1-1     | TC-1-1-1 ... TC-1-1-4    |
+| REQ-1-2     | TC-1-2-1 ... TC-1-2-22   |
+| REQ-1-3     | TC-1-3-1 ... TC-1-3-7    |
+| REQ-1-4     | TC-1-4-1                 |
+| REQ-1-5     | TC-1-5-1 ... TC-1-5-4    |
+| REQ-1-6     | TC-1-6-1                 |
+| REQ-1-7     | TC-1-7-1                 |
+| REQ-1-8     | TC-1-8-1 ... TC-1-8-20   |
+| REQ-1-9     | TC-1-9-1                 |
+| REQ-1-10    | TC-1-10-1 ... TC-1-10-5  |
+| REQ-1-11    | TC-1-11-1 ... TC-1-11-7  |
+| REQ-1-12    | TC-1-12-1 ... TC-1-12-14 |
 
 ## Out of scope
 
