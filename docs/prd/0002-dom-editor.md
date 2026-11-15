@@ -26,7 +26,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-16] While the field is open, the editor shall draw the in-progress label in the view without changing the document, so the node's width and its children follow the text. Cancelling shall restore the original layout; committing shall record one change.
 - [REQ-2-17] In selection mode, a printable key shall not start editing on a non-empty node; on an empty selected node, the first printable key shall open the field and be inserted. F2 shall not be bound, Space or a double click shall open the field, Escape shall keep the selection, and arrows shall navigate without folding. Enter while editing shall commit and return to selection without inserting a node; a following Enter in selection mode shall insert a sibling and open its field. The container shall expose `mm-editor-mode-select` and `mm-editor-mode-edit`.
 - [REQ-2-18] When the host requests a snapshot during editing, the editor shall include the current label and keep the field, focus and edit mode active so the user can continue typing after autosave.
-- [REQ-2-19] When the host asks the editor to insert a block, insert a label or delete the selection, the editor shall run the matching command, record one history entry, expose the new selection, and reject an unsupported operation without changing the document.
+- [REQ-2-19] When the host asks the editor to insert a block, insert a label or delete the selection, the editor shall run the matching command, record one history entry, expose the new selection, and reject an unsupported operation without changing the document. It shall also return the selected node's Markdown block; for a root without a block, it shall return the frontmatter title as a level-one heading followed by every child block, without frontmatter.
 
 ## Acceptance tests
 
@@ -50,7 +50,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-16    | TC-2-16-1 ... TC-2-16-6  |
 | REQ-2-17    | TC-2-17-1 ... TC-2-17-8  |
 | REQ-2-18    | TC-2-18-1, TC-2-18-2     |
-| REQ-2-19    | TC-2-19-1 ... TC-2-19-3  |
+| REQ-2-19    | TC-2-19-1 ... TC-2-19-4  |
 
 ## Decisions
 
