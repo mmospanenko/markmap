@@ -1,5 +1,11 @@
 import type { Document, EditNode, Range } from '@markmap/model';
-import { firstLine, HEADING_MARKER, LIST_MARKER, parseDocument } from '@markmap/model';
+import {
+  firstLine,
+  HEADING_MARKER,
+  LIST_MARKER,
+  nodeAtOffset,
+  parseDocument,
+} from '@markmap/model';
 import { EditError } from './errors';
 
 export function lineEnding(source: string): string {
@@ -232,6 +238,66 @@ export function shiftHeadings(text: string, delta: number, ending: string): stri
       return line.replace(/^([ \t]{0,3})(#{1,6})(?=[ \t]|$)/, (_, space: string) => {
         return `${space}${'#'.repeat(level)}`;
       });
+    })
+    .join(ending);
+}
+
+function listStartLine(line: string, node: EditNode, base: string): string {
+  if (node.kind === 'heading' || node.kind === 'root') {
+    const match = /^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)/.exec(line);
+    if (!match) return line;
+    return `${base}- ${line.slice(match[0].length)}`;
+  }
+  if (node.kind === 'listItem') {
+    const match = /^[ \t]*([-+*]|\d{1,9}[.)])(?:[ \t]+|$)(\[[ xX]\][ \t]+)?/.exec(line);
+    if (!match) return line;
+    return `${base}${match[1]} ${match[2] ?? ''}${line.slice(match[0].length)}`;
+  }
+  return line;
+}
+
+function listContinuationLine(line: string, node: EditNode, base: string): string {
+  const list = node.list;
+  const originalBase = list ? list.indent.length : 0;
+  const originalWidth = list ? list.marker.length + 1 : 0;
+  const width = list ? list.marker.length + 1 : 2;
+  const prefix = /^[ \t]*/.exec(line)?.[0] ?? '';
+  const relative = Math.max(0, prefix.length - originalBase - originalWidth);
+  return `${base}${' '.repeat(width + relative)}${line.slice(prefix.length)}`;
+}
+
+export function headingsToList(text: string, indent: string, unit: string, ending: string): string {
+  const { document } = parseDocument(text);
+  const root = document.nodes.get(document.root);
+  if (!root) throw new EditError('E_SHAPE', 'The pasted text has no root');
+  const top = root.block
+    ? root
+    : root.children
+        .map((id) => document.nodes.get(id))
+        .find((child): child is EditNode => Boolean(child?.block));
+  if (!top) throw new EditError('E_SHAPE', 'The pasted text has no editable node');
+  const depths = new Map<string, number>();
+  const visit = (node: EditNode, depth: number): void => {
+    depths.set(node.id, depth);
+    for (const id of node.children) {
+      const child = document.nodes.get(id);
+      if (child) visit(child, depth + 1);
+    }
+  };
+  visit(top, 0);
+  let offset = 0;
+  return text
+    .split(ending)
+    .map((line) => {
+      const start = offset;
+      offset += line.length + ending.length;
+      if (!line.trim()) return line;
+      const owner = nodeAtOffset(document, start);
+      const depth = owner ? depths.get(owner.id) : undefined;
+      if (!owner || depth === undefined) return line;
+      const base = indent + unit.repeat(depth);
+      if (owner.block?.start === start) return listStartLine(line, owner, base);
+      return listContinuationLine(line, owner, base);
     })
     .join(ending);
 }

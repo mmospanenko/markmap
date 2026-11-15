@@ -69,9 +69,8 @@ describe('insert block', () => {
     expect(result.document.source).toBe('# A\n\nnote a\n\n## B\n### A\n\nnote a\n');
   });
 
-  it('[TC-1-12-5] rejects a heading under a list item and an excessive level', () => {
-    const input = '- a\n# A\n##### E\n### C\n#### D\n';
-    expect(() => paste(input, 'a', '# A')).toThrowError(/heading cannot be pasted/);
+  it('[TC-1-12-5] rejects an excessive heading level', () => {
+    const input = '# A\n##### E\n### C\n#### D\n';
     expect(() => paste(input, 'E', '### C\n#### D')).toThrowError(/cannot exceed six/);
     expect(buildDocument(input).source).toBe(input);
   });
@@ -109,7 +108,44 @@ describe('insert block', () => {
       .map((id) => result.document.nodes.get(id))
       .find((node) => node?.label?.start === result.selection);
     expect(selected ? labelText(result.document, selected) : '').toBe('B');
-    expect(editError(() => paste('- a\n# A\n', 'a', '# A'))).toBeInstanceOf(EditError);
     expect(editError(() => paste('# A\n', 'A', '# B\n# C'))).toBeInstanceOf(EditError);
+  });
+
+  it('[TC-1-12-10] converts a heading subtree pasted under a list item', () => {
+    const input = '# A\n## B\nnote b\n- x\n  note x\n  - y\n- a\n';
+    const result = paste(input, 'a', '## B\nnote b\n- x\n  note x\n  - y');
+    expect(result.document.source).toBe(
+      '# A\n## B\nnote b\n- x\n  note x\n  - y\n- a\n  - B\n    note b\n    - x\n      note x\n      - y\n',
+    );
+    const selected = result.document.order
+      .map((id) => result.document.nodes.get(id))
+      .find((node) => node?.label?.start === result.selection);
+    expect(selected ? labelText(result.document, selected) : '').toMatch(/^B\n/u);
+  });
+
+  it('[TC-1-12-11] keeps ordered and task markers and target children', () => {
+    const input = '# A\n## B\n1. [x] one\n2. [ ] two\n- target\n  - existing\n';
+    const result = paste(input, 'target', '## B\n1. [x] one\n2. [ ] two');
+    expect(result.document.source).toBe(
+      '# A\n## B\n1. [x] one\n2. [ ] two\n- target\n  - existing\n  - B\n    1. [x] one\n    2. [ ] two\n',
+    );
+  });
+
+  it('[TC-1-12-12] converts with CRLF line endings', () => {
+    const input = '# A\r\n## B\r\n- x\r\n- a\r\n';
+    const result = paste(input, 'a', '## B\r\n- x');
+    expect(result.document.source).toBe('# A\r\n## B\r\n- x\r\n- a\r\n  - B\r\n    - x\r\n');
+  });
+
+  it('[TC-1-12-13] converts nested heading levels into list depth', () => {
+    const input = '# A\n## B\n### C\n#### D\n- a\n';
+    const result = paste(input, 'a', '## B\n### C\n#### D');
+    expect(result.document.source).toBe(
+      '# A\n## B\n### C\n#### D\n- a\n  - B\n    - C\n      - D\n',
+    );
+  });
+
+  it('[TC-1-12-14] rejects an empty heading converted under a list item', () => {
+    expect(() => paste('- a\n', 'a', '##')).toThrowError(/did not survive/u);
   });
 });
