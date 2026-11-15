@@ -62,6 +62,7 @@ export class MarkmapEditor {
   private readonly restoreTabIndex: boolean;
   private readonly stops: Array<() => void> = [];
   private doc: MarkdownDocument;
+  private title = '';
   private selectedId: string | null = null;
   private selectionOffset = 0;
   private editing: Editing | null = null;
@@ -70,7 +71,9 @@ export class MarkmapEditor {
   constructor({ source, view, container, placeholder, onChange, onError }: MarkmapEditorOptions) {
     this.view = view;
     this.container = container;
-    this.doc = parseDocument(source).document;
+    const parsed = parseDocument(source);
+    this.doc = parsed.document;
+    this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
     this.onChange = onChange;
     this.onError = onError;
     this.placeholder = placeholder?.trim() || 'New topic';
@@ -144,6 +147,7 @@ export class MarkmapEditor {
     const parsed = parseDocument(source);
     this.stopEditingUi();
     this.doc = parsed.document;
+    this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
     this.history.clear();
     this.view.setTree(parsed.tree);
     const offset = options.selection ?? this.doc.nodes.get(this.doc.root)?.label?.start ?? 0;
@@ -167,8 +171,20 @@ export class MarkmapEditor {
       if (this.commitEditing() === 'error') return;
     }
     const node = this.doc.nodes.get(nodeId);
+    if (!node) return;
     const first = this.isEmptyRoot(node);
-    if (!node || (!node.label && !first)) return;
+    if (!node.label && !first) {
+      if (node.kind === 'root' && this.title) {
+        this.onError?.(
+          new EditError(
+            'E_LABEL',
+            'The root title comes from frontmatter; edit it in the source view',
+            node.id,
+          ),
+        );
+      }
+      return;
+    }
     const rect = this.view.screenRect(nodeId);
     if (!rect) return;
     const label = node.label ? labelText(this.doc, node) : '';
@@ -569,7 +585,13 @@ export class MarkmapEditor {
   }
 
   private isEmptyRoot(node: EditNode | undefined): boolean {
-    return node?.kind === 'root' && !node.block && !node.label && this.doc.nodes.size === 1;
+    return (
+      node?.kind === 'root' &&
+      !node.block &&
+      !node.label &&
+      this.doc.nodes.size === 1 &&
+      !this.title
+    );
   }
 
   private snapshot(): HistoryEntry {
@@ -584,6 +606,7 @@ export class MarkmapEditor {
     const parsed = parseDocument(entry.source);
     this.stopEditingUi();
     this.doc = parsed.document;
+    this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
     this.view.setTree(parsed.tree);
     this.view.setFoldedIds(entry.folded, { animate: false });
     this.selectAt(entry.selection, { reveal: false });
