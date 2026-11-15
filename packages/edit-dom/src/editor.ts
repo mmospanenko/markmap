@@ -317,6 +317,15 @@ export class MarkmapEditor {
     if (event.isComposing || event.keyCode === 229) return;
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === 'z') {
+      if (this.editing && !event.shiftKey && this.editing.field.value !== this.editing.original) {
+        event.preventDefault();
+        const field = this.editing.field;
+        field.value = this.editing.original;
+        field.setSelectionRange(field.value.length, field.value.length);
+        this.positionEditing();
+        this.paintSelection();
+        return;
+      }
       if (this.editing && this.editing.field.value === this.editing.original) {
         event.preventDefault();
         this.stopEditingUi();
