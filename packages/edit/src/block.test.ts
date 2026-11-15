@@ -43,6 +43,10 @@ describe('insert block', () => {
       .map((id) => result.document.nodes.get(id))
       .find((node) => node?.label?.start === result.selection);
     expect(selected ? labelText(result.document, selected) : '').toBe('b');
+    const withNote = paste('- a\n- b\n  - c\n\n    note\n', 'a', '- b\n  - c\n\n    note');
+    expect(withNote.document.source).toBe(
+      '- a\n  - b\n    - c\n\n      note\n- b\n  - c\n\n    note\n',
+    );
   });
 
   it('[TC-1-12-2] pastes a heading subtree under a heading with renumbered levels', () => {
