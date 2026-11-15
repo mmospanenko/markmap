@@ -227,7 +227,7 @@ describe('MarkmapEditor', () => {
     const { container, view, editor } = setup();
     const id = nodeId(editor, 'a');
     clickNode(container, view, id);
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'changed');
     key(field(container), 'Escape');
     expect(editor.source).toBe('- a\n- b\n');
@@ -238,7 +238,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-3-2] rejects a line break in a heading label', () => {
     const { container, view, editor, errors } = setup('# A\n');
     clickNode(container, view, editor.document.root);
-    key(container, 'F2');
+    key(container, ' ');
     key(field(container), 'Enter', { shiftKey: true });
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain('line break');
@@ -247,7 +247,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-3-3] keeps editing when the label is invalid', () => {
     const { container, view, editor, errors } = setup('# A\n');
     clickNode(container, view, editor.document.root);
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a\nb');
     key(field(container), 'Enter');
     expect(editor.isEditing).toBe(true);
@@ -297,7 +297,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-4-5] keeps a label with text when Backspace is pressed in its field', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     expect(field(container).value).toBe('a');
 
     key(field(container), 'Backspace');
@@ -331,7 +331,7 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-4-7] keeps the empty root when Backspace is pressed in its field', () => {
     const { container, editor, errors } = setup('');
-    key(container, 'F2');
+    key(container, ' ');
     expect(editor.isEditing).toBe(true);
 
     key(field(container), 'Backspace');
@@ -340,7 +340,7 @@ describe('MarkmapEditor', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('[TC-2-5-1] navigates siblings and children', () => {
+  it('[TC-2-5-1] navigates siblings, parents, and children', () => {
     const { container, view, editor } = setup('- a\n  - a1\n- b\n');
     const a = nodeId(editor, 'a');
     const a1 = nodeId(editor, 'a1');
@@ -355,19 +355,60 @@ describe('MarkmapEditor', () => {
     key(container, 'ArrowLeft');
     expect(editor.selected).toBe(a);
     key(container, 'ArrowLeft');
-    expect(view.folded.has(a)).toBe(true);
-    key(container, 'ArrowLeft');
     expect(editor.selected).toBe(editor.document.root);
+    expect(view.folded.has(a)).toBe(false);
   });
 
-  it('[TC-2-5-2] folds and unfolds with arrows', () => {
+  it('[TC-2-5-2] unfolds and enters a folded child with arrows', () => {
     const { container, view, editor } = setup('- a\n  - a1\n- b\n');
     const a = nodeId(editor, 'a');
+    view.folded.add(a);
     clickNode(container, view, a);
-    key(container, 'ArrowLeft');
-    expect(view.folded.has(a)).toBe(true);
     key(container, 'ArrowRight');
     expect(view.folded.has(a)).toBe(false);
+    expect(editor.selected).toBe(a);
+    key(container, 'ArrowRight');
+    expect(editor.selected).toBe(nodeId(editor, 'a1'));
+  });
+
+  it('[TC-2-17-1] leaves F2 unbound in selection mode', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-17-2] enters with Space, exits with Escape, and keeps the selection', () => {
+    const { container, view, editor } = setup();
+    const a = nodeId(editor, 'a');
+    clickNode(container, view, a);
+    expect(container.classList.contains('mm-editor-mode-select')).toBe(true);
+    key(container, ' ');
+    expect(editor.isEditing).toBe(true);
+    expect(container.classList.contains('mm-editor-mode-edit')).toBe(true);
+    key(field(container), 'Escape');
+    expect(editor.isEditing).toBe(false);
+    expect(container.classList.contains('mm-editor-mode-select')).toBe(true);
+    expect(editor.selected).toBe(a);
+    expect(editor.source).toBe('- a\n- b\n');
+    key(container, 'Escape');
+    expect(editor.selected).toBe(a);
+  });
+
+  it('[TC-2-17-3] sets a label programmatically', () => {
+    const { editor, changes } = setup();
+    expect(editor.setLabel(nodeId(editor, 'a'), 'A')).toBe(true);
+    expect(editor.source).toBe('- A\n- b\n');
+    expect(changes).toHaveLength(1);
+    expect(editor.setLabel('missing', 'x')).toBe(false);
+  });
+
+  it('[TC-2-17-4] adds a child when Enter is pressed on a non-empty root', () => {
+    const { container, editor } = setup();
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toContain('New topic');
   });
 
   it('[TC-2-6-1] undoes and redoes an edit', () => {
@@ -386,7 +427,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-7-1] places the editor over the node', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     const element = field(container);
     expect(element.style.display).toBe('block');
     expect(element.style.left).toBe('10px');
@@ -399,7 +440,7 @@ describe('MarkmapEditor', () => {
     const { container, view, editor } = setup();
     view.scale = 2;
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     const element = field(container);
     expect(element.style.width).toBe('50px');
     expect(element.style.height).toBe('20px');
@@ -410,7 +451,7 @@ describe('MarkmapEditor', () => {
     const { container, view, editor } = setup();
     view.directions.set(nodeId(editor, 'a'), 'right');
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     const element = field(container);
     expect(element.style.textAlign).toBe('left');
@@ -422,7 +463,7 @@ describe('MarkmapEditor', () => {
     const { container, view, editor } = setup();
     view.defaultDirection = 'left';
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     const element = field(container);
     expect(element.style.textAlign).toBe('right');
@@ -434,7 +475,7 @@ describe('MarkmapEditor', () => {
     const { container, view, editor } = setup();
     view.defaultDirection = 'top';
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     const element = field(container);
     expect(element.style.textAlign).toBe('center');
@@ -457,7 +498,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-8-2] commits an in-progress label on demand', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'c');
     editor.commit();
     expect(editor.source).toBe('- c\n- b\n');
@@ -467,7 +508,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-16-1] previews the label in the view while typing', () => {
     const { container, view, editor, changes } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     expect(treeLabel(view.tree?.children[0])).toBe('a much longer label');
     expect(editor.source).toBe('- a\n- b\n');
@@ -477,7 +518,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-16-2] restores the layout when editing is cancelled', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     key(field(container), 'Escape');
     expect(treeLabel(view.tree?.children[0])).toBe('a');
@@ -488,7 +529,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-16-3] keeps one change after previewing a label', () => {
     const { container, view, editor, changes } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     editor.commit();
     expect(editor.source).toBe('- a much longer label\n- b\n');
@@ -499,7 +540,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-16-4] restores the preview when the text returns to the original', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'a much longer label');
     type(container, 'a');
     expect(treeLabel(view.tree?.children[0])).toBe('a');
@@ -508,7 +549,7 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-5] previews the first heading in an empty document', () => {
     const { container, view, editor, changes } = setup('');
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'First note');
     expect(treeLabel(view.tree)).toBe('First note');
     expect(editor.source).toBe('');
@@ -518,7 +559,7 @@ describe('MarkmapEditor', () => {
   it('[TC-2-16-6] keeps the last valid preview for an invalid label', () => {
     const { container, view, editor } = setup('# a\n');
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'ab');
     type(container, 'a\nb');
     expect(treeLabel(view.tree)).toBe('ab');
@@ -531,7 +572,7 @@ describe('MarkmapEditor', () => {
     const a = nodeId(editor, 'a');
     view.folded.add(a);
     clickNode(container, view, a);
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'A');
     key(field(container), 'Enter');
     const renamed = nodeId(editor, 'A');
@@ -597,7 +638,7 @@ describe('MarkmapEditor edges', () => {
     const a = nodeId(editor, 'a');
     const b = nodeId(editor, 'b');
     clickNode(container, view, a);
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'z');
     field(container).dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     expect(editor.isEditing).toBe(true);
@@ -614,7 +655,7 @@ describe('MarkmapEditor edges', () => {
   it('[TC-2-13-5] ignores a double click while editing or away from a node', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     container.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     expect(editor.isEditing).toBe(true);
     key(field(container), 'Escape');
@@ -623,21 +664,22 @@ describe('MarkmapEditor edges', () => {
     expect(editor.isEditing).toBe(false);
   });
 
-  it('[TC-2-13-6] starts typing, ignores Alt and toggles folds', () => {
+  it('[TC-2-13-6] ignores printable keys in selection mode and toggles folds', () => {
     const { container, view, editor } = setup();
     const a = nodeId(editor, 'a');
     clickNode(container, view, a);
     key(container, 'x');
-    expect(editor.isEditing).toBe(true);
-    expect(field(container).value).toBe('ax');
-    key(field(container), 'Escape');
-    key(container, 'y', { altKey: true });
     expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+    key(container, ' ');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('a');
+    key(field(container), 'Escape');
     key(container, '/', { metaKey: true });
     expect(view.folded.has(a)).toBe(true);
   });
 
-  it('[TC-2-13-7] stops arrows at boundaries and folds the root', () => {
+  it('[TC-2-13-7] stops arrows at boundaries', () => {
     const { container, view, editor } = setup();
     const a = nodeId(editor, 'a');
     const b = nodeId(editor, 'b');
@@ -652,13 +694,14 @@ describe('MarkmapEditor edges', () => {
     key(container, 'ArrowLeft');
     expect(editor.selected).toBe(editor.document.root);
     key(container, 'ArrowLeft');
-    expect(view.folded.has(editor.document.root)).toBe(true);
+    expect(editor.selected).toBe(editor.document.root);
+    expect(view.folded.has(editor.document.root)).toBe(false);
   });
 
   it('[TC-2-13-8] allows Shift+Enter in a list label', () => {
     const { container, view, editor } = setup('- a\n');
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     const event = new KeyboardEvent('keydown', {
       key: 'Enter',
       shiftKey: true,
@@ -672,7 +715,7 @@ describe('MarkmapEditor edges', () => {
   it('[TC-2-13-9] outdents from the field with Shift+Tab', () => {
     const { container, view, editor } = setup('- a\n  - b\n- c\n');
     clickNode(container, view, nodeId(editor, 'b'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'B');
     key(field(container), 'Tab', { shiftKey: true });
     expect(editor.source).toBe('- a\n- B\n- c\n');
@@ -682,7 +725,7 @@ describe('MarkmapEditor edges', () => {
   it('[TC-2-13-10] inserts after an unchanged field', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     key(field(container), 'Enter');
     expect(editor.source).toBe('- a\n- New topic\n- b\n');
     expect(editor.isEditing).toBe(true);
@@ -708,7 +751,7 @@ describe('MarkmapEditor edges', () => {
     const { container, view, editor } = setup();
     const a = nodeId(editor, 'a');
     clickNode(container, view, a);
-    key(container, 'F2');
+    key(container, ' ');
     view.rects.set(a, undefined);
     view.emit('render');
     expect(editor.isEditing).toBe(false);
@@ -761,13 +804,16 @@ describe('MarkmapEditor edges', () => {
   });
 
   it('[TC-2-13-18] ignores keys without a selection', () => {
-    const { container, editor } = setup();
-    key(container, 'Escape');
+    const source = '---\ntitle: T\n---\n\n- a\n- b\n';
+    const { container, editor } = setup(source);
+    editor.setSource(source, { selection: 0 });
     expect(editor.selected).toBeNull();
     key(container, 'Enter');
-    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.source).toBe(source);
     key(container, '/', { metaKey: true });
     expect(editor.isEditing).toBe(false);
+    key(container, 'Escape');
+    expect(editor.selected).toBeNull();
   });
 
   it('[TC-2-13-19] ignores a prevented key', () => {
@@ -785,7 +831,7 @@ describe('MarkmapEditor edges', () => {
   it('[TC-2-13-20] replaces the source while editing', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'x');
     editor.setSource('- z\n');
     expect(editor.isEditing).toBe(false);
@@ -798,7 +844,7 @@ describe('MarkmapEditor edges', () => {
     const a = nodeId(editor, 'a');
     const b = nodeId(editor, 'b');
     clickNode(container, view, a);
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'A');
     editor.startEditing(b);
     expect(editor.source).toBe('- A\n- b\n');
@@ -865,7 +911,8 @@ describe('Empty document', () => {
     const { container, editor, changes } = setup('');
     expect(editor.selected).toBe(editor.document.root);
 
-    key(container, 'F');
+    key(container, ' ');
+    type(container, 'F');
     expect(field(container).value).toBe('F');
     expect(editor.source).toBe('');
 
@@ -877,7 +924,7 @@ describe('Empty document', () => {
 
   it('[TC-2-14-2] cancels the first label without a change', () => {
     const { container, editor, changes } = setup('');
-    key(container, 'F2');
+    key(container, ' ');
     expect(editor.isEditing).toBe(true);
     key(field(container), 'Escape');
     expect(editor.isEditing).toBe(false);
@@ -898,7 +945,7 @@ describe('Empty document', () => {
 
   it('[TC-2-14-4] undoes the first heading and keeps the root selected', () => {
     const { container, editor } = setup('');
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'First note');
     editor.commit();
     expect(editor.source).toBe('# First note');
@@ -906,13 +953,14 @@ describe('Empty document', () => {
     expect(editor.undo()).toBe(true);
     expect(editor.source).toBe('');
     expect(editor.selected).toBe(editor.document.root);
-    key(container, 'N');
+    key(container, ' ');
+    type(container, 'N');
     expect(field(container).value).toBe('N');
   });
 
   it('[TC-2-14-5] keeps a promoted root selected after a rename', () => {
     const { container, editor } = setup('# A\n');
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'B');
     editor.commit();
     expect(editor.source).toBe('# B\n');
@@ -932,7 +980,7 @@ describe('Empty document', () => {
 
   it('[TC-2-14-7] reports a notice for a root label from frontmatter', () => {
     const { container, editor, errors } = setup('---\ntitle: T\n---\n');
-    key(container, 'F2');
+    key(container, ' ');
     expect(editor.isEditing).toBe(false);
     expect(errors[0]?.message).toContain('frontmatter');
     expect(editor.source).toBe('---\ntitle: T\n---\n');
@@ -974,7 +1022,7 @@ describe('History', () => {
   it('[TC-2-6-2] resets the field with Cmd+Z before undoing the document', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
-    key(container, 'F2');
+    key(container, ' ');
     type(container, 'ab');
 
     key(field(container), 'z', { metaKey: true });

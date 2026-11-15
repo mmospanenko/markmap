@@ -21,6 +21,7 @@ The editor:
 - highlights the selection with a class on the group;
 - replays selection and editing classes after every render;
 - maps the keyboard to `@markmap/edit` commands;
+- keeps selection and editing as explicit modes: Space or a double click opens the field, Escape returns to selection, and printable keys do not edit;
 - keeps history as source snapshots and restores folds by id.
 
 ## Consequences
