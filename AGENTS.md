@@ -55,6 +55,7 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 - Do not publish under the `@markmap/*` scope. The fork is consumed through git.
 - Do not write comments in code. Tests and docs carry the explanation.
 - Every behavior test carries a `[TC-N-M-K]` name and maps to a `[REQ-N-M]` in `docs/prd`.
+- Every change adds or updates tests. `pnpm verify` must pass. The changed files must have no uncovered lines or branches.
 - Run `node scripts/check-trace.mjs` after adding or renaming a test or requirement.
 - Mixed or unsupported structures are opaque and reject structural commands. Do not guess a structure for them.
 - Preserve the document line ending style and every byte outside the edit ranges.
@@ -72,6 +73,12 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 6. Update the PRD acceptance table and the ADR when a decision changes.
 
 Process documents: `docs/process/sdlc.md`, `docs/process/testing.md`, `docs/process/bugs.md`, `docs/process/checks.md`.
+
+## Worktrees and sync
+
+All work happens in `.worktrees/<name>`, never in the main checkout; agents run in parallel. The directory is gitignored and the OpenCode project config points there.
+
+When the work is done, push the worktree branch and open a PR into `feat/editable-model`. Merge through GitHub after CI. Do not commit or merge directly into `feat/editable-model`.
 
 ## Markmap facts
 
