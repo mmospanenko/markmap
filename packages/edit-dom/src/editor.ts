@@ -47,7 +47,7 @@ const styleUsers = new WeakMap<Document, number>();
 
 type NoteFormat = 'bold' | 'italic' | 'code' | 'link' | 'quote' | 'block';
 
-const NOTE_ICON = 'M4 2.5h5l3 3v8H4zM9 2.5v3h3M6.2 8h3.6M6.2 10.5h3.6';
+const NOTE_ICON = 'M3 13l1-3.4L11 2.6a1.7 1.7 0 0 1 2.4 2.4L6.4 12 3 13zM9.9 3.7l2.4 2.4';
 
 const NOTE_ACTIONS: ReadonlyArray<{ format: NoteFormat; name: string; icon: string }> = [
   {

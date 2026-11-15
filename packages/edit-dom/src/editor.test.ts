@@ -1388,11 +1388,17 @@ describe('MarkmapEditor notes', () => {
     expect(notesPanel(container)).toBeNull();
   });
 
-  it('[TC-3-7-5] adds a compact header with a note icon and a muted label', () => {
+  it('[TC-3-7-5] adds a compact header with a pencil icon and a muted label', () => {
     const { container, view, editor } = setup('- a\n');
     openNotes(container, view, editor, 'a');
     const header = notesPanel(container)?.querySelector<HTMLElement>('.mm-editor-notes-header');
-    expect(header?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    const icon = header?.querySelector('svg[aria-hidden="true"]');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 16 16');
+    const path = icon?.querySelector('path');
+    expect(path?.getAttribute('d')).toBe(
+      'M3 13l1-3.4L11 2.6a1.7 1.7 0 0 1 2.4 2.4L6.4 12 3 13zM9.9 3.7l2.4 2.4',
+    );
+    expect(path?.getAttribute('d')).not.toBe('M4 2.5h5l3 3v8H4zM9 2.5v3h3M6.2 8h3.6M6.2 10.5h3.6');
     expect(header?.querySelector('.mm-editor-notes-title')?.textContent).toBe('Notes');
     expect(header?.querySelector('.mm-editor-notes-label')?.textContent).toBe('Markdown');
     const style = document.getElementById('mm-editor-style')?.textContent ?? '';
