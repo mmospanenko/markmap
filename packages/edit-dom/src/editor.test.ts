@@ -258,6 +258,77 @@ describe('MarkmapEditor', () => {
     expect(editor.source).toBe('- b\n');
   });
 
+  it('[TC-2-4-3] removes a new empty node with Backspace and selects the node before it', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- \u200B\n- b\n');
+
+    key(field(container), 'Backspace');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.selected).toBe(nodeId(editor, 'a'));
+  });
+
+  it('[TC-2-4-4] removes a new empty child with Delete and selects its parent', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Tab');
+    expect(editor.source).toBe('- a\n  - \u200B\n- b\n');
+
+    key(field(container), 'Delete');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.selected).toBe(nodeId(editor, 'a'));
+  });
+
+  it('[TC-2-4-5] keeps a label with text when Backspace is pressed in its field', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    expect(field(container).value).toBe('a');
+
+    key(field(container), 'Backspace');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-4-6] restores the removed empty node with undo', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Enter');
+    key(field(container), 'Backspace');
+    expect(editor.source).toBe('- a\n- b\n');
+
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- \u200B\n- b\n');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.selected).toBe(nodeId(editor, '\u200B'));
+  });
+
+  it('[TC-2-4-8] keeps a new node with typed text when Backspace is pressed', () => {
+    const { container, view, editor } = setup('- a\n- b\n', { placeholder: '\u200B' });
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Enter');
+    type(container, 'x');
+
+    key(field(container), 'Backspace');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- \u200B\n- b\n');
+  });
+
+  it('[TC-2-4-7] keeps the empty root when Backspace is pressed in its field', () => {
+    const { container, editor, errors } = setup('');
+    key(container, 'F2');
+    expect(editor.isEditing).toBe(true);
+
+    key(field(container), 'Backspace');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('');
+    expect(errors).toHaveLength(0);
+  });
+
   it('[TC-2-5-1] navigates siblings and children', () => {
     const { container, view, editor } = setup('- a\n  - a1\n- b\n');
     const a = nodeId(editor, 'a');

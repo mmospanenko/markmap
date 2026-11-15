@@ -11,7 +11,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-1] When the editor starts and when the user clicks a node, the editor shall select it, highlight its SVG group and keep the root selected by default.
 - [REQ-2-2] When the user presses Enter or Tab on a selected node, the editor shall insert a sibling or child with a placeholder label, select it and start editing.
 - [REQ-2-3] When editing ends, the editor shall commit with Enter, Tab or a click elsewhere, cancel with Escape, reject line breaks in heading labels and keep the field open when a label is invalid.
-- [REQ-2-4] When the user presses Shift+Tab or Delete, the editor shall outdent or remove the selected node through the core commands.
+- [REQ-2-4] When the user presses Shift+Tab or Delete, the editor shall outdent or remove the selected node through the core commands. When the open field of a newly inserted node is empty, Backspace or Delete shall remove that node and select the node before it.
 - [REQ-2-5] When the user presses an arrow key, the editor shall move the selection to a sibling, parent or child, and fold or unfold where the arrow crosses a branch.
 - [REQ-2-6] When the user presses Cmd/Ctrl+Z or Cmd/Ctrl+Shift+Z, the editor shall undo or redo a document change together with the selection.
 - [REQ-2-7] When the view renders or zooms, the editor shall reposition the field over the edited node.
@@ -30,7 +30,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-1     | TC-2-1-1, TC-2-1-2       |
 | REQ-2-2     | TC-2-2-1 ... TC-2-2-3    |
 | REQ-2-3     | TC-2-3-1 ... TC-2-3-3    |
-| REQ-2-4     | TC-2-4-1 ... TC-2-4-7    |
+| REQ-2-4     | TC-2-4-1 ... TC-2-4-8    |
 | REQ-2-5     | TC-2-5-1, TC-2-5-2       |
 | REQ-2-6     | TC-2-6-1, TC-2-6-2       |
 | REQ-2-7     | TC-2-7-1                 |
