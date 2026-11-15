@@ -6,11 +6,23 @@ import {
   type MdastBlock,
   type SourceRange,
 } from '@markmap/core';
-import type { Heading, List, ListItem, Node, PhrasingContent, Root, RootContent } from 'mdast';
+import type {
+  Code,
+  Heading,
+  List,
+  ListItem,
+  Node,
+  PhrasingContent,
+  Root,
+  RootContent,
+} from 'mdast';
+import type { PluggableList } from 'unified';
+import { parseMdast } from './pipeline';
 
 export interface ToTreeOptions {
   /** Title for a synthesized root, usually from frontmatter. */
   title?: string;
+  plugins?: PluggableList;
 }
 
 /**
@@ -38,7 +50,7 @@ export function toTree(mdast: Root, options: ToTreeOptions = {}): MarkmapNode {
       stack.at(-1)!.node.children.push(node);
       stack.push({ depth: block.depth, node });
     } else {
-      addBlock(stack.at(-1)!.node, block);
+      addBlock(stack.at(-1)!.node, block, options);
     }
   }
 
@@ -98,25 +110,42 @@ function inlineRange(label: PhrasingContent[]): SourceRange | undefined {
   return start <= end ? { start, end } : undefined;
 }
 
-function addBlock(parent: MarkmapNode, block: RootContent) {
+function addBlock(parent: MarkmapNode, block: RootContent, options: ToTreeOptions) {
+  if (isNoteFence(block)) {
+    addFence(parent, block, options);
+    return;
+  }
   switch (block.type) {
     case 'list':
-      addList(parent, block);
+      addList(parent, block, options);
       return;
     case 'html':
     case 'yaml':
     case 'definition':
       return;
     default:
-      attach(parent, block as MdastBlock);
+      if (isMdastBlock(block)) attach(parent, block, rangeOf(block), false);
   }
 }
 
-function addList(parent: MarkmapNode, list: List) {
-  for (const item of list.children) parent.children.push(fromListItem(item, list));
+function isNoteFence(block: RootContent): block is Code {
+  return block.type === 'code' && block.lang?.trim() === 'markmap-note';
 }
 
-function fromListItem(item: ListItem, list: List): MarkmapNode {
+function addFence(parent: MarkmapNode, fence: Code, options: ToTreeOptions): void {
+  const source = rangeOf(fence);
+  const { mdast } = parseMdast(fence.value, options.plugins ?? []);
+  for (const block of mdast.children) {
+    if (block.type === 'yaml') continue;
+    if (isMdastBlock(block)) attach(parent, block, source, true);
+  }
+}
+
+function addList(parent: MarkmapNode, list: List, options: ToTreeOptions) {
+  for (const item of list.children) parent.children.push(fromListItem(item, list, options));
+}
+
+function fromListItem(item: ListItem, list: List, options: ToTreeOptions): MarkmapNode {
   const [first, ...rest] = item.children;
   // `- # Title` uses the heading as the label too.
   const hasLabel = first?.type === 'paragraph' || first?.type === 'heading';
@@ -128,13 +157,43 @@ function fromListItem(item: ListItem, list: List): MarkmapNode {
   );
   if (list.ordered) node.data.ordered = true;
   if (item.checked != null) node.data.checked = item.checked;
-  for (const block of hasLabel ? rest : item.children) addBlock(node, block);
+  for (const block of hasLabel ? rest : item.children) addBlock(node, block, options);
   return node;
 }
 
-function attach(node: MarkmapNode, block: MdastBlock) {
-  const note: Note = { block: stripPositions(block), after: node.children.length };
+function attach(
+  node: MarkmapNode,
+  block: MdastBlock,
+  source: SourceRange | undefined,
+  fence: boolean,
+) {
+  const note: Note = { block: stripPositions(block), after: node.children.length, fence };
+  if (source) note.source = source;
   node.notes.push(note);
+}
+
+function rangeOf(node: Node): SourceRange | undefined {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  return start == null || end == null ? undefined : { start, end };
+}
+
+function isMdastBlock(block: RootContent): block is MdastBlock {
+  switch (block.type) {
+    case 'blockquote':
+    case 'code':
+    case 'definition':
+    case 'footnoteDefinition':
+    case 'heading':
+    case 'html':
+    case 'list':
+    case 'paragraph':
+    case 'table':
+    case 'thematicBreak':
+      return true;
+    default:
+      return false;
+  }
 }
 
 function promoteSingleH1(root: MarkmapNode): MarkmapNode {

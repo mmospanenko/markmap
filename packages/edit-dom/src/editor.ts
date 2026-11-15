@@ -9,6 +9,7 @@ import {
 import {
   labelText,
   nodeAtOffset,
+  notesText,
   parseDocument,
   type Document as MarkdownDocument,
   type EditNode,
@@ -29,8 +30,25 @@ const STYLE = `
 .mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto;transform-origin:top left}
 .mm-editor-selection{position:absolute;display:none;pointer-events:none;box-sizing:border-box;border:2px solid var(--oc-focus,#0097e6);border-radius:6px}
 .mm-editor-editing text{visibility:hidden}
+.mm-editor-notes{position:absolute;display:flex;flex-direction:column;gap:6px;padding:8px;box-sizing:border-box;background:var(--oc-editor-background,var(--oc-background,#fff));color:var(--oc-foreground,#1f2328);border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);pointer-events:auto;z-index:3;font:inherit;text-align:left;overflow:hidden}
+.mm-editor-notes-toolbar{display:flex;flex-wrap:wrap;gap:4px}
+.mm-editor-notes-toolbar button{margin:0;padding:2px 6px;border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:4px;background:var(--oc-button-background,transparent);color:inherit;font:inherit;font-size:.85em;line-height:1.4;cursor:pointer}
+.mm-editor-notes-toolbar button:hover{border-color:var(--oc-focus,#0097e6)}
+.mm-editor-notes-field{flex:1 1 auto;min-height:96px;margin:0;padding:6px 8px;border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:6px;background:var(--oc-input-background,var(--oc-background,#fff));color:inherit;font:inherit;line-height:1.4;resize:none;overflow:auto;outline:none;box-sizing:border-box}
+.mm-editor-notes-field:focus{border-color:var(--oc-focus,#0097e6)}
 `;
 const styleUsers = new WeakMap<Document, number>();
+
+type NoteFormat = 'bold' | 'italic' | 'code' | 'link' | 'quote' | 'block';
+
+const NOTE_ACTIONS: ReadonlyArray<{ format: NoteFormat; name: string; text: string }> = [
+  { format: 'bold', name: 'Bold', text: 'B' },
+  { format: 'italic', name: 'Italic', text: 'I' },
+  { format: 'code', name: 'Inline code', text: '`' },
+  { format: 'link', name: 'Link', text: 'Link' },
+  { format: 'quote', name: 'Quote', text: '>' },
+  { format: 'block', name: 'Code block', text: '{ }' },
+];
 
 function acquireStyle(doc: Document): void {
   const count = styleUsers.get(doc) ?? 0;
@@ -53,6 +71,12 @@ function releaseStyle(doc: Document): void {
   doc.getElementById(STYLE_ID)?.remove();
 }
 
+function backtickRun(text: string): number {
+  let longest = 0;
+  for (const run of text.match(/`+/gu) ?? []) longest = Math.max(longest, run.length);
+  return longest + 1;
+}
+
 interface Editing {
   nodeId: string;
   previewId: string;
@@ -61,6 +85,13 @@ interface Editing {
   first: boolean;
   preview: boolean;
   folds: string[];
+  field: HTMLTextAreaElement;
+}
+
+interface NotesEditing {
+  nodeId: string;
+  original: string;
+  panel: HTMLDivElement;
   field: HTMLTextAreaElement;
 }
 
@@ -82,6 +113,7 @@ export class MarkmapEditor {
   private selectedId: string | null = null;
   private selectionOffset = 0;
   private editing: Editing | null = null;
+  private notes: NotesEditing | null = null;
   private previewing = false;
   private destroyed = false;
 
@@ -149,6 +181,10 @@ export class MarkmapEditor {
     return this.editing !== null;
   }
 
+  get isEditingNotes(): boolean {
+    return this.notes !== null;
+  }
+
   get canUndo(): boolean {
     return this.history.canUndo;
   }
@@ -163,6 +199,7 @@ export class MarkmapEditor {
 
   setSource(source: string, options: { selection?: number; emit?: boolean } = {}): void {
     const parsed = parseDocument(source);
+    this.closeNotes(false);
     this.stopEditingUi(false);
     this.doc = parsed.document;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
@@ -229,7 +266,38 @@ export class MarkmapEditor {
     else this.field.setSelectionRange(text.length, text.length);
   }
 
+  editNotes(nodeId?: string | null): boolean {
+    const requested = nodeId ?? this.selectedId;
+    if (!requested) return false;
+    if (this.notes) {
+      if (this.notes.nodeId === requested) return true;
+      if (this.commitNotes({ keepOpen: false }) === 'error') return false;
+    }
+    if (this.editing && this.commitEditing() === 'error') return false;
+    const id = nodeId ?? this.selectedId;
+    if (!id) return false;
+    const node = this.doc.nodes.get(id);
+    if (!node) return false;
+    if (node.opaque || !node.capabilities.editNotes) {
+      this.onError?.(new EditError('E_CAPABILITY', 'The node cannot hold notes', node.id));
+      return false;
+    }
+    const label = node.label ? labelText(this.doc, node) : '';
+    if (!label.trim() && !(node.kind === 'root' && this.title)) {
+      this.onError?.(new EditError('E_LABEL', 'The node has no label', node.id));
+      return false;
+    }
+    if (!this.view.screenRect(node.id)) return false;
+    this.select(node.id, { reveal: false });
+    this.openNotes(node);
+    return true;
+  }
+
   commitForSnapshot(): string {
+    if (this.notes) {
+      this.commitNotes({ keepOpen: true });
+      return this.doc.source;
+    }
     const editing = this.editing;
     if (!editing) return this.doc.source;
     const text = editing.field.value;
@@ -272,8 +340,12 @@ export class MarkmapEditor {
       .filter((child): child is EditNode => Boolean(child?.block));
     const first = children[0];
     const last = children[children.length - 1];
-    const body =
-      first?.block && last?.block ? this.doc.source.slice(first.block.start, last.block.end) : '';
+    const ranges = node.notes.map((note) => note.range);
+    if (first?.block) ranges.push(first.block);
+    if (last?.block) ranges.push(last.block);
+    const start = ranges.length ? Math.min(...ranges.map((range) => range.start)) : null;
+    const end = ranges.length ? Math.max(...ranges.map((range) => range.end)) : null;
+    const body = start == null || end == null ? '' : this.doc.source.slice(start, end);
     const title = this.title.replace(/\s+/gu, ' ').trim();
     if (!title) return body || null;
     const heading = `# ${title}`;
@@ -294,6 +366,10 @@ export class MarkmapEditor {
   }
 
   commit(): void {
+    if (this.notes) {
+      this.commitNotes({ keepOpen: false });
+      return;
+    }
     this.commitEditing();
   }
 
@@ -320,6 +396,7 @@ export class MarkmapEditor {
     this.container.removeEventListener('click', this.handleClick);
     this.container.removeEventListener('dblclick', this.handleDoubleClick);
     this.field.removeEventListener('input', this.handleInput);
+    this.closeNotes(false);
     this.layer.remove();
     releaseStyle(this.container.ownerDocument);
     if (this.restorePosition) this.container.style.position = '';
@@ -338,6 +415,7 @@ export class MarkmapEditor {
   };
 
   private handleViewChange = (): void => {
+    if (this.notes) this.positionNotes();
     if (this.previewing) return;
     if (this.editing) this.positionEditing();
     this.paintSelection();
@@ -345,8 +423,12 @@ export class MarkmapEditor {
   };
 
   private handleClick = (event: MouseEvent): void => {
-    const target = event.target as Node | null;
-    if (this.editing && target && this.editing.field.contains(target)) return;
+    const target = event.target;
+    if (this.notes) {
+      if (target instanceof Node && this.notes.panel.contains(target)) return;
+      if (this.commitNotes({ keepOpen: false }) === 'error') return;
+    }
+    if (this.editing && target instanceof Node && this.editing.field.contains(target)) return;
     if (event.button !== 0) return;
     if (this.editing && this.commitEditing() === 'error') return;
     const hit = this.hitAt(event);
@@ -357,7 +439,7 @@ export class MarkmapEditor {
   };
 
   private handleDoubleClick = (event: MouseEvent): void => {
-    if (this.editing) return;
+    if (this.editing || this.notes) return;
     const hit = this.hitAt(event);
     if (hit?.kind === 'node' && hit.nodeId) {
       this.select(hit.nodeId, { reveal: false });
@@ -369,6 +451,10 @@ export class MarkmapEditor {
   private handleKeyDown = (event: KeyboardEvent): void => {
     if (event.defaultPrevented) return;
     if (event.isComposing || event.keyCode === 229) return;
+    if (this.notes) {
+      this.handleNotesKey(event);
+      return;
+    }
     if (this.editing) {
       this.handleEditingKey(event);
       return;
@@ -488,6 +574,212 @@ export class MarkmapEditor {
     }
   }
 
+  private handleNotesKey(event: KeyboardEvent): void {
+    const notes = this.notes;
+    if (!notes) return;
+    const target = event.target;
+    if (!(target instanceof Node) || !notes.panel.contains(target)) {
+      notes.field.focus({ preventScroll: true });
+      return;
+    }
+    const mod = event.metaKey || event.ctrlKey;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.closeNotes();
+      return;
+    }
+    if (event.key === 'Enter' && mod) {
+      event.preventDefault();
+      this.commitNotes({ keepOpen: false });
+      return;
+    }
+    if (mod && event.key.toLowerCase() === 'b') {
+      event.preventDefault();
+      this.formatNotes('bold');
+      return;
+    }
+    if (mod && event.key.toLowerCase() === 'i') {
+      event.preventDefault();
+      this.formatNotes('italic');
+    }
+  }
+
+  private openNotes(node: EditNode): void {
+    const doc = this.container.ownerDocument;
+    const panel = doc.createElement('div');
+    panel.className = 'mm-editor-notes';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Notes');
+
+    const toolbar = doc.createElement('div');
+    toolbar.className = 'mm-editor-notes-toolbar';
+    toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+    for (const action of NOTE_ACTIONS) {
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.className = 'mm-editor-notes-button';
+      button.setAttribute('aria-label', action.name);
+      button.textContent = action.text;
+      button.addEventListener('click', () => this.formatNotes(action.format));
+      toolbar.append(button);
+    }
+
+    const field = doc.createElement('textarea');
+    field.className = 'mm-editor-notes-field';
+    field.setAttribute('aria-label', 'Note text');
+    field.spellcheck = false;
+    field.value = notesText(this.doc, node);
+
+    panel.append(toolbar, field);
+    this.layer.append(panel);
+    this.notes = { nodeId: node.id, original: field.value, panel, field };
+    doc.addEventListener('mousedown', this.handleDocumentMouseDown);
+    this.positionNotes();
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(field.value.length, field.value.length);
+  }
+
+  private handleDocumentMouseDown = (event: MouseEvent): void => {
+    const notes = this.notes;
+    if (!notes) return;
+    const target = event.target;
+    if (target instanceof Node && notes.panel.contains(target)) return;
+    this.commitNotes({ keepOpen: false });
+  };
+
+  private closeNotes(focus = true): void {
+    const notes = this.notes;
+    if (!notes) return;
+    this.container.ownerDocument.removeEventListener('mousedown', this.handleDocumentMouseDown);
+    notes.panel.remove();
+    this.notes = null;
+    if (focus && !this.destroyed) this.container.focus({ preventScroll: true });
+  }
+
+  private commitNotes(options: { keepOpen: boolean }): 'none' | 'changed' | 'error' {
+    const notes = this.notes;
+    if (!notes) return 'none';
+    const text = notes.field.value;
+    if (text === notes.original) {
+      if (!options.keepOpen) this.closeNotes();
+      return 'none';
+    }
+    const before = this.snapshot();
+    const result = this.apply({ type: 'setNotes', node: notes.nodeId, text });
+    if (!result) return 'error';
+    notes.original = text;
+    if (result.edits.length) this.history.push(before);
+    if (options.keepOpen) {
+      notes.field.focus({ preventScroll: true });
+      this.positionNotes();
+    } else {
+      this.closeNotes();
+    }
+    return result.edits.length ? 'changed' : 'none';
+  }
+
+  private positionNotes(): void {
+    const notes = this.notes;
+    if (!notes) return;
+    const rect = this.view.screenRect(notes.nodeId);
+    if (!rect) {
+      this.closeNotes();
+      return;
+    }
+    const box = this.container.getBoundingClientRect();
+    const margin = 8;
+    const width = Math.max(0, Math.min(400, box.width - margin * 2));
+    notes.panel.style.width = `${width}px`;
+    notes.panel.style.maxHeight = `${Math.max(80, box.height / 2)}px`;
+    const height = notes.panel.getBoundingClientRect().height || 220;
+    const below = rect.y + rect.height + margin;
+    const above = rect.y - margin - height;
+    const preferred = below + height <= box.y + box.height ? below : above;
+    const top = Math.max(box.y + margin, Math.min(preferred, box.y + box.height - margin - height));
+    const left = Math.max(
+      box.x + margin,
+      Math.min(rect.x + rect.width / 2 - width / 2, box.x + box.width - margin - width),
+    );
+    notes.panel.style.left = `${left - box.x}px`;
+    notes.panel.style.top = `${top - box.y}px`;
+  }
+
+  private formatNotes(format: NoteFormat): void {
+    const notes = this.notes;
+    if (!notes) return;
+    const field = notes.field;
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    const value = field.value;
+    const selected = value.slice(start, end);
+    if (format === 'bold') {
+      this.wrapNotes(field, '**', '**');
+      return;
+    }
+    if (format === 'italic') {
+      this.wrapNotes(field, '_', '_');
+      return;
+    }
+    if (format === 'code') {
+      const run = '`'.repeat(backtickRun(selected));
+      this.wrapNotes(field, run, run);
+      return;
+    }
+    if (format === 'link') {
+      const url = start + selected.length + 3;
+      field.value = `${value.slice(0, start)}[${selected}](url)${value.slice(end)}`;
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(url, url + 3);
+      this.positionNotes();
+      return;
+    }
+    if (format === 'quote') {
+      if (!selected) {
+        const from = value.lastIndexOf('\n', start - 1) + 1;
+        const caret = start + 2;
+        field.value = `${value.slice(0, from)}> ${value.slice(from)}`;
+        field.focus({ preventScroll: true });
+        field.setSelectionRange(caret, caret);
+        this.positionNotes();
+        return;
+      }
+      const from = value.lastIndexOf('\n', start - 1) + 1;
+      const lineEnd = value.indexOf('\n', end);
+      const to = lineEnd === -1 ? value.length : lineEnd;
+      const quoted = value
+        .slice(from, to)
+        .split('\n')
+        .map((line) => `> ${line}`)
+        .join('\n');
+      field.value = value.slice(0, from) + quoted + value.slice(to);
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(from, from + quoted.length);
+      this.positionNotes();
+      return;
+    }
+    const fence = '`'.repeat(Math.max(3, backtickRun(selected)));
+    const body = selected
+      ? `${fence}\n${selected}${selected.endsWith('\n') ? '' : '\n'}${fence}`
+      : `${fence}\n\n${fence}`;
+    const caret = start + fence.length + 1;
+    field.value = value.slice(0, start) + body + value.slice(end);
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(caret, caret);
+    this.positionNotes();
+  }
+
+  private wrapNotes(field: HTMLTextAreaElement, prefix: string, suffix: string): void {
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    const value = field.value;
+    const selected = value.slice(start, end);
+    field.value = `${value.slice(0, start)}${prefix}${selected}${suffix}${value.slice(end)}`;
+    const caret = start + prefix.length;
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(caret, selected ? caret + selected.length : caret);
+    this.positionNotes();
+  }
+
   private insertAndEdit(kind: 'insertSibling' | 'insertChild'): void {
     const id = this.selectedId;
     if (!id) return;
@@ -530,6 +822,7 @@ export class MarkmapEditor {
     try {
       const result = applyCommand(this.doc, command);
       this.doc = result.document;
+      if (!result.edits.length) return result;
       if (editing && command.type === 'setLabel' && command.node === editing.nodeId) {
         const target = nodeAtOffset(result.document, result.selection);
         if (target) {
@@ -540,6 +833,7 @@ export class MarkmapEditor {
       this.view.setTree(result.tree);
       this.restoreFolds(folds, result);
       this.selectAt(result.selection, { reveal: false });
+      if (command.type === 'setNotes') this.select(command.node, { reveal: false });
       this.emitChange();
       return result;
     } catch (error) {
@@ -777,6 +1071,7 @@ export class MarkmapEditor {
 
   private restore(entry: HistoryEntry): void {
     const parsed = parseDocument(entry.source);
+    this.closeNotes(false);
     this.stopEditingUi(false);
     this.doc = parsed.document;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';

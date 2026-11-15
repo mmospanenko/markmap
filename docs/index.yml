@@ -5,6 +5,9 @@ documents:
   - id: PRD-2
     title: Keyboard editor over a Markmap view
     path: prd/0002-dom-editor.md
+  - id: PRD-3
+    title: Notes editing
+    path: prd/0003-notes.md
   - id: ADR-1
     title: Source-preserving edits over a validated model
     path: adr/0001-source-preserving-edits.md
