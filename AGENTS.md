@@ -1,6 +1,6 @@
 # Agent guide
 
-Internal fork of [markmap](https://github.com/markmap/markmap) at `v1.1.1`. The renderer stays upstream-compatible. The fork adds source-preserving node editing for Markmap Markdown.
+Fork of [markmap](https://github.com/markmap/markmap) at `v1.1.1`. The renderer stays upstream-compatible. The fork adds source-preserving node editing for Markmap Markdown.
 
 English is the repository language for code, tests, docs and commits. Chat replies follow the user's language.
 
@@ -54,6 +54,7 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 - Keep changes to `core`, `parse`, `render` and `view` minimal and upstream-friendly. New behavior belongs in `model` and `edit`.
 - Do not publish under the `@markmap/*` scope. The fork is consumed through git.
 - Do not write comments in code. Tests and docs carry the explanation.
+- Docs are public. Use placeholders and synthetic examples; no local paths, usernames, sessions, or personal data.
 - Every behavior test carries a `[TC-N-M-K]` name and maps to a `[REQ-N-M]` in `docs/prd`.
 - Every change adds or updates tests. `pnpm verify` must pass. The changed files must have no uncovered lines or branches.
 - Run `node scripts/check-trace.mjs` after adding or renaming a test or requirement.
