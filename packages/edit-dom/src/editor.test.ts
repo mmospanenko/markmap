@@ -183,13 +183,36 @@ describe('MarkmapEditor', () => {
     expect(field(container).selectionEnd).toBe('New topic'.length);
   });
 
-  it('[TC-2-2-2] commits the label and inserts the next sibling', () => {
+  it('[TC-2-17-5] commits the label and returns to selection', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, 'Enter');
     type(container, 'c');
     key(field(container), 'Enter');
+    expect(editor.source).toBe('- a\n- c\n- b\n');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.selected).toBe(nodeId(editor, 'c'));
+  });
+
+  it('[TC-2-17-6] inserts a sibling on the next Enter from selection', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Enter');
+    type(container, 'c');
+    key(field(container), 'Enter');
+    key(container, 'Enter');
     expect(editor.source).toBe('- a\n- c\n- New topic\n- b\n');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('New topic');
+  });
+
+  it('[TC-2-17-7] commits and inserts a child when Tab is pressed while editing', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'A');
+    key(field(container), 'Tab');
+    expect(editor.source).toBe('- A\n  - New topic\n- b\n');
     expect(editor.isEditing).toBe(true);
     expect(field(container).value).toBe('New topic');
   });
@@ -200,7 +223,8 @@ describe('MarkmapEditor', () => {
     key(container, 'Tab');
     type(container, 'child');
     key(field(container), 'Enter');
-    expect(editor.source).toBe('- a\n  - child\n  - New topic\n- b\n');
+    expect(editor.source).toBe('- a\n  - child\n- b\n');
+    expect(editor.isEditing).toBe(false);
   });
 
   it('[TC-2-2-5] starts a new node with an empty label', () => {
@@ -423,7 +447,7 @@ describe('MarkmapEditor', () => {
     key(container, 'z', { metaKey: true });
     expect(editor.source).toBe('- a\n- New topic\n- b\n');
     key(container, 'z', { metaKey: true, shiftKey: true });
-    expect(editor.source).toBe('- a\n- c\n- New topic\n- b\n');
+    expect(editor.source).toBe('- a\n- c\n- b\n');
   });
 
   it('[TC-2-7-1] places the editor over the node', () => {
@@ -724,13 +748,13 @@ describe('MarkmapEditor edges', () => {
     expect(editor.isEditing).toBe(false);
   });
 
-  it('[TC-2-13-10] inserts after an unchanged field', () => {
+  it('[TC-2-13-10] exits an unchanged field on Enter', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     key(field(container), 'Enter');
-    expect(editor.source).toBe('- a\n- New topic\n- b\n');
-    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.isEditing).toBe(false);
   });
 
   it('[TC-2-13-11] guards editing without a label, a rect or a new node', () => {
@@ -934,12 +958,15 @@ describe('Empty document', () => {
     expect(changes).toHaveLength(0);
   });
 
-  it('[TC-2-14-3] opens the first label with Enter and adds a child after it', () => {
+  it('[TC-2-14-3] opens the first label and exits on Enter', () => {
     const { container, editor } = setup('', { placeholder: '\u200B' });
     key(container, 'Enter');
     expect(editor.isEditing).toBe(true);
     type(container, 'First note');
     key(field(container), 'Enter');
+    expect(editor.source).toBe('# First note');
+    expect(editor.isEditing).toBe(false);
+    key(container, 'Enter');
     expect(editor.source).toBe('# First note\n## \u200B');
     expect(editor.isEditing).toBe(true);
     key(field(container), 'Escape');
@@ -1031,5 +1058,22 @@ describe('History', () => {
     expect(field(container).value).toBe('a');
     expect(editor.isEditing).toBe(true);
     expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-6-3] undoes and redoes a document change from an unchanged edit field', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Delete');
+    clickNode(container, view, nodeId(editor, 'b'));
+    key(container, ' ');
+    key(field(container), 'z', { metaKey: true });
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+
+    clickNode(container, view, nodeId(editor, 'b'));
+    key(container, ' ');
+    key(field(container), 'z', { metaKey: true, shiftKey: true });
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- b\n');
   });
 });

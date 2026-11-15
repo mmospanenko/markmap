@@ -24,7 +24,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-14] When the document is empty, the editor shall open an editable first node and keep the source unchanged until its label is committed, hide the empty selection frame, and report a notice instead of editing a root label that comes from the frontmatter title.
 - [REQ-2-15] When the label grows while editing, the editor shall keep the node's text anchor fixed: a start-aligned node grows to the right, an end-aligned node grows to the left, and a centered node grows symmetrically.
 - [REQ-2-16] While the field is open, the editor shall draw the in-progress label in the view without changing the document, so the node's width and its children follow the text. Cancelling shall restore the original layout; committing shall record one change.
-- [REQ-2-17] In selection mode, a printable key shall not start editing, F2 shall not be bound, Space or a double click shall open the field, Escape shall keep the selection, and arrows shall navigate without folding. The container shall expose `mm-editor-mode-select` and `mm-editor-mode-edit`.
+- [REQ-2-17] In selection mode, a printable key shall not start editing, F2 shall not be bound, Space or a double click shall open the field, Escape shall keep the selection, and arrows shall navigate without folding. Enter while editing shall commit and return to selection without inserting a node; a following Enter in selection mode shall insert a sibling and open its field. The container shall expose `mm-editor-mode-select` and `mm-editor-mode-edit`.
 
 ## Acceptance tests
 
@@ -35,7 +35,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-3     | TC-2-3-1 ... TC-2-3-3    |
 | REQ-2-4     | TC-2-4-1 ... TC-2-4-8    |
 | REQ-2-5     | TC-2-5-1, TC-2-5-2       |
-| REQ-2-6     | TC-2-6-1, TC-2-6-2       |
+| REQ-2-6     | TC-2-6-1 ... TC-2-6-3    |
 | REQ-2-7     | TC-2-7-1                 |
 | REQ-2-8     | TC-2-8-1                 |
 | REQ-2-9     | TC-2-9-1                 |
@@ -46,7 +46,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-14    | TC-2-14-1 ... TC-2-14-7  |
 | REQ-2-15    | TC-2-15-1 ... TC-2-15-3  |
 | REQ-2-16    | TC-2-16-1 ... TC-2-16-6  |
-| REQ-2-17    | TC-2-17-1, TC-2-17-2     |
+| REQ-2-17    | TC-2-17-1 ... TC-2-17-7  |
 
 ## Decisions
 
