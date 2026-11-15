@@ -1,6 +1,7 @@
 import { buildDocument } from '@markmap/model';
 import { describe, expect, it } from 'vitest';
 import {
+  blockInsertion,
   cleanLabel,
   dedentHeadings,
   dedentList,
@@ -8,6 +9,8 @@ import {
   insertLine,
   listLine,
   placeBlock,
+  reindentList,
+  shiftHeadings,
 } from './format';
 
 describe('format', () => {
@@ -42,5 +45,27 @@ describe('format', () => {
     expect(moved).toContain('## C');
     const root = doc.nodes.get(doc.root)!;
     expect(() => dedentHeadings(doc, root, 1, '\n')).toThrowError(/below one/);
+  });
+
+  it('[TC-1-11-5] reindents a list block up and down', () => {
+    expect(reindentList('- a\n  - b', 2, '\n')).toBe('  - a\n    - b');
+    expect(reindentList('  - a\n    - b', -2, '\n')).toBe('- a\n  - b');
+    expect(reindentList('  - a\n x', -2, '\n')).toBe('- a\n x');
+    expect(reindentList('  - a', 0, '\n')).toBe('  - a');
+  });
+
+  it('[TC-1-11-6] shifts headings and rejects the bounds', () => {
+    expect(shiftHeadings('# A\n## B', 1, '\n')).toBe('## A\n### B');
+    expect(shiftHeadings('# A', 0, '\n')).toBe('# A');
+    expect(() => shiftHeadings('# A', -1, '\n')).toThrowError(/below one/);
+    expect(() => shiftHeadings('###### A', 1, '\n')).toThrowError(/exceed six/);
+  });
+
+  it('[TC-1-11-7] inserts a block at a line boundary', () => {
+    expect(blockInsertion('a', 1, 'b', '\n')).toEqual({ insert: '\nb', leading: 1 });
+    expect(blockInsertion('ab', 1, 'X', '\n')).toEqual({ insert: '\nX\n', leading: 1 });
+    expect(blockInsertion('a\n', 2, 'b', '\n')).toEqual({ insert: 'b\n', leading: 0 });
+    expect(blockInsertion('a', 1, 'b\n', '\n')).toEqual({ insert: '\nb\n', leading: 1 });
+    expect(blockInsertion('a\n- b', 2, 'c', '\n')).toEqual({ insert: 'c\n', leading: 0 });
   });
 });

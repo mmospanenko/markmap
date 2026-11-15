@@ -13,6 +13,10 @@ const STYLE_ID = 'mm-editor-style';
 const MODE_SELECT = 'mm-editor-mode-select';
 const MODE_EDIT = 'mm-editor-mode-edit';
 const EMPTY_LABEL = '\u200B';
+
+type CommandWithoutNode = {
+  [K in Command['type']]: Omit<Extract<Command, { type: K }>, 'node'>;
+}[Command['type']];
 const STYLE = `
 .mm-editor-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
 .mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto;transform-origin:top left}
@@ -251,6 +255,18 @@ export class MarkmapEditor {
     return true;
   }
 
+  insertBlock(text: string): boolean {
+    return this.runSelected({ type: 'insertBlock', text }) !== null;
+  }
+
+  insertLabel(text: string): boolean {
+    return this.runSelected({ type: 'insertChild', text }) !== null;
+  }
+
+  deleteSelected(): boolean {
+    return this.runSelected({ type: 'delete' }) !== null;
+  }
+
   commit(): void {
     this.commitEditing();
   }
@@ -469,7 +485,7 @@ export class MarkmapEditor {
     this.startEditing(created.id, { selectAll: true });
   }
 
-  private runSelected(command: { type: 'outdent' | 'delete' }): EditResult | null {
+  private runSelected(command: CommandWithoutNode): EditResult | null {
     const id = this.selectedId;
     if (!id) return null;
     return this.run({ ...command, node: id });

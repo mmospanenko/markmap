@@ -1,5 +1,5 @@
 import type { Document, EditNode, Range } from '@markmap/model';
-import { firstLine, HEADING_MARKER, LIST_MARKER } from '@markmap/model';
+import { firstLine, HEADING_MARKER, LIST_MARKER, parseDocument } from '@markmap/model';
 import { EditError } from './errors';
 
 export function lineEnding(source: string): string {
@@ -28,6 +28,27 @@ export function cutRange(source: string, block: Range): Range {
 export interface InsertedLine {
   insert: string;
   leading: number;
+}
+
+export function blockInsertion(
+  source: string,
+  position: number,
+  block: string,
+  ending: string,
+): InsertedLine {
+  const atLineStart = position === 0 || source[position - 1] === '\n';
+  const prefix = atLineStart ? '' : ending;
+  const hasNewline = block.endsWith('\n') || block.endsWith('\r\n');
+  const newlineAfter = newlineLengthAt(source, position) > 0;
+  let suffix = '';
+  if (!hasNewline) {
+    if (atLineStart) {
+      if (position < source.length || newlineLengthAt(source, position - 1) > 0) suffix = ending;
+    } else if (!newlineAfter && position < source.length) {
+      suffix = ending;
+    }
+  }
+  return { insert: prefix + block + suffix, leading: prefix.length };
 }
 
 export function insertLine(
@@ -187,4 +208,51 @@ export function firstLineMarker(text: string): number {
   if (list) return list[0].length;
   const heading = HEADING_MARKER.exec(line);
   return heading ? heading[0].length : 0;
+}
+
+export function shiftHeadings(text: string, delta: number, ending: string): string {
+  if (delta === 0) return text;
+  const { document } = parseDocument(text);
+  const levels = new Map<number, number>();
+  for (const id of document.order) {
+    const node = document.nodes.get(id);
+    if (!node?.block || (node.kind !== 'heading' && node.kind !== 'root')) continue;
+    const level = node.level + delta;
+    if (level < 1) throw new EditError('E_LEVEL', 'Heading level would drop below one', node.id);
+    if (level > 6) throw new EditError('E_LEVEL', 'Heading level cannot exceed six', node.id);
+    levels.set(node.block.start, level);
+  }
+  let offset = 0;
+  return text
+    .split(ending)
+    .map((line) => {
+      const level = levels.get(offset);
+      offset += line.length + ending.length;
+      if (level == null) return line;
+      return line.replace(/^([ \t]{0,3})(#{1,6})(?=[ \t]|$)/, (_, space: string) => {
+        return `${space}${'#'.repeat(level)}`;
+      });
+    })
+    .join(ending);
+}
+
+export function reindentList(text: string, delta: number, ending: string): string {
+  if (delta === 0) return text;
+  if (delta > 0) {
+    const pad = ' '.repeat(delta);
+    return text
+      .split(ending)
+      .map((line) => (line.trim() ? pad + line : line))
+      .join(ending);
+  }
+  const cut = -delta;
+  return text
+    .split(ending)
+    .map((line) => {
+      if (!line.trim()) return line;
+      const prefix = /^[ \t]*/.exec(line)?.[0] ?? '';
+      if (prefix.length >= cut) return prefix.slice(cut) + line.slice(prefix.length);
+      return line;
+    })
+    .join(ending);
 }
