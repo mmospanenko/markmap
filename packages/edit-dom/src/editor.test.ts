@@ -445,6 +445,41 @@ describe('MarkmapEditor', () => {
     expect(editor.setLabel('missing', 'x')).toBe(false);
   });
 
+  it('[TC-2-19-1] inserts a pasted block and selects its root', () => {
+    const { container, view, editor, changes, errors } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    expect(editor.insertBlock('- b\n  - c')).toBe(true);
+    expect(editor.source).toBe('- a\n  - b\n    - c\n- b\n');
+    expect(editor.selected).toBe(nodeId(editor, 'b'));
+    expect(changes).toHaveLength(1);
+    expect(editor.canUndo).toBe(true);
+    expect(editor.insertBlock('plain note')).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-19-2] inserts a label as a child', () => {
+    const { container, view, editor, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    expect(editor.insertLabel('New label')).toBe(true);
+    expect(editor.source).toBe('- a\n  - New label\n- b\n');
+    expect(editor.selected).toBe(nodeId(editor, 'New label'));
+    expect(changes).toHaveLength(1);
+  });
+
+  it('[TC-2-19-3] deletes the selected subtree and rejects the root', () => {
+    const { container, view, editor, errors } = setup('- a\n  - b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    expect(editor.deleteSelected()).toBe(true);
+    expect(editor.source).toBe('- c\n');
+    expect(editor.selected).toBe(nodeId(editor, 'c'));
+    clickNode(container, view, editor.document.root);
+    expect(editor.deleteSelected()).toBe(false);
+    expect(editor.source).toBe('- c\n');
+    expect(errors).toHaveLength(1);
+  });
+
   it('[TC-2-17-4] adds a child when Enter is pressed on a non-empty root', () => {
     const { container, editor } = setup();
     key(container, 'Enter');

@@ -1,5 +1,6 @@
 import type { MarkmapNode } from '@markmap/core';
 import {
+  firstLine,
   labelText,
   lineEnd,
   parseDocument,
@@ -10,6 +11,7 @@ import {
 import { EditError } from './errors';
 import {
   assertSingleLine,
+  blockInsertion,
   childIndent,
   childMarker,
   cleanLabel,
@@ -24,6 +26,8 @@ import {
   listLine,
   newlineLengthAt,
   placeBlock,
+  reindentList,
+  shiftHeadings,
 } from './format';
 import { applySplices, mapOffset, type Splice } from './splice';
 
@@ -32,6 +36,7 @@ export type Command =
   | { type: 'insertFirst'; node: string; text: string }
   | { type: 'insertChild'; node: string; text?: string }
   | { type: 'insertSibling'; node: string; text?: string }
+  | { type: 'insertBlock'; node: string; text: string }
   | { type: 'delete'; node: string }
   | { type: 'outdent'; node: string }
   | { type: 'toggleCheck'; node: string };
@@ -84,6 +89,8 @@ function planCommand(doc: Document, command: Command): Plan {
       return planInsert(doc, node, command.text ?? '', 'child');
     case 'insertSibling':
       return planInsert(doc, node, command.text ?? '', 'sibling');
+    case 'insertBlock':
+      return planInsertBlock(doc, node, command.text);
     case 'delete':
       return planDelete(doc, node);
     case 'outdent':
@@ -236,6 +243,69 @@ function planInsert(doc: Document, node: EditNode, raw: string, mode: 'child' | 
         next.source.slice(created.label.start, created.label.end) !== expectedLabel
       ) {
         throw shape('The new label did not survive parsing');
+      }
+    },
+  };
+}
+
+function normalizeBlockText(raw: string, ending: string): string {
+  const trimmed = raw
+    .replace(/\r\n?/g, '\n')
+    .replace(/^(?:[ \t]*\n)+/u, '')
+    .replace(/(?:\n[ \t]*)+$/u, '');
+  return ending === '\n' ? trimmed : trimmed.replace(/\n/g, ending);
+}
+
+function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
+  requireCapability(node, 'addChild');
+  const ending = lineEnding(doc.source);
+  const block = normalizeBlockText(raw, ending);
+  if (!block.trim()) throw new EditError('E_LABEL', 'The pasted text is empty', node.id);
+  const fragment = parseDocument(block).document;
+  const fragmentRoot = fragment.nodes.get(fragment.root);
+  if (!fragmentRoot) throw shape('The pasted text has no root');
+  const top = fragmentRoot.block
+    ? fragmentRoot
+    : fragmentRoot.children
+        .map((id) => fragment.nodes.get(id))
+        .find((child): child is EditNode => Boolean(child?.block));
+  if (!top || !top.label) {
+    throw new EditError('E_SHAPE', 'The pasted text has no editable node', node.id);
+  }
+  const count = fragment.nodes.size - (fragmentRoot.block ? 0 : 1);
+  let moved: string;
+  if (top.kind === 'heading' || top.kind === 'root') {
+    if (node.kind === 'listItem') {
+      throw new EditError('E_CAPABILITY', 'A heading cannot be pasted under a list item', node.id);
+    }
+    const parentLevel = node.kind === 'root' ? (node.block ? node.level : 0) : node.level;
+    moved = shiftHeadings(block, parentLevel + 1 - top.level, ending);
+  } else if (top.kind === 'listItem') {
+    if (!top.list) throw shape('The pasted list item has no list info');
+    const indent = node.kind === 'listItem' ? childIndent(doc, node) : '';
+    moved = reindentList(block, indent.length - top.list.indent.length, ending);
+  } else {
+    throw new EditError('E_SHAPE', 'The pasted text has no editable node', node.id);
+  }
+  const position = node.block ? node.block.end : doc.source.length;
+  const placed = blockInsertion(doc.source, position, moved, ending);
+  const expected = firstLine(fragment.source, top.label.start).replace(/\r$/u, '');
+  const emptyRoot = node.kind === 'root' && !node.block && node.children.length === 0;
+  return {
+    edits: [{ from: position, to: position, insert: placed.insert }],
+    selection: { kind: 'insert', edit: 0, offset: placed.leading + firstLineMarker(moved) },
+    verify(next, selection) {
+      const created = nodeByLabelStart(next, selection);
+      if (!created) throw shape('The pasted root did not survive parsing');
+      if (created.parent !== node.id && !(emptyRoot && created.id === next.root)) {
+        throw shape('The pasted subtree landed in the wrong place');
+      }
+      if (countSubtree(next, created) !== count) throw shape('The pasted subtree changed shape');
+      if (
+        !created.label ||
+        firstLine(next.source, created.label.start).replace(/\r$/u, '') !== expected
+      ) {
+        throw shape('The pasted label did not survive parsing');
       }
     },
   };
