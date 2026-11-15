@@ -24,6 +24,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-14] When the document is empty, the editor shall open an editable first node and keep the source unchanged until its label is committed, hide the empty selection frame, and report a notice instead of editing a root label that comes from the frontmatter title.
 - [REQ-2-15] When the label grows while editing, the editor shall keep the node's text anchor fixed: a start-aligned node grows to the right, an end-aligned node grows to the left, and a centered node grows symmetrically.
 - [REQ-2-16] While the field is open, the editor shall draw the in-progress label in the view without changing the document, so the node's width and its children follow the text. Cancelling shall restore the original layout; committing shall record one change.
+- [REQ-2-17] In selection mode, a printable key shall not start editing, F2 shall not be bound, Space or a double click shall open the field, Escape shall keep the selection, and arrows shall navigate without folding. The container shall expose `mm-editor-mode-select` and `mm-editor-mode-edit`.
 
 ## Acceptance tests
 
@@ -45,6 +46,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-14    | TC-2-14-1 ... TC-2-14-7  |
 | REQ-2-15    | TC-2-15-1 ... TC-2-15-3  |
 | REQ-2-16    | TC-2-16-1 ... TC-2-16-6  |
+| REQ-2-17    | TC-2-17-1, TC-2-17-2     |
 
 ## Decisions
 
