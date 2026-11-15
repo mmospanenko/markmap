@@ -16,6 +16,7 @@ Keep the view unchanged. A new `@markmap/edit-dom` package owns selection, keybo
 The editor:
 
 - positions a `<textarea>` over `screenRect(id)` in a layer inside the host container;
+- draws the in-progress label as a preview tree while typing, so the layout makes room for it;
 - hides the node's text while editing with a class on the SVG group;
 - highlights the selection with a class on the group;
 - replays selection and editing classes after every render;
@@ -25,6 +26,7 @@ The editor:
 ## Consequences
 
 - The renderer stays untouched and the editor is testable with a fake view in happy-dom.
+- Typing changes only the preview tree. The document changes on commit, and cancelling restores the original tree and folds.
 - The host gives the container a size and, when needed, the editor sets `position: relative` and restores it on destroy.
 - The field styling is approximate: it inherits the host font and uses a small default padding. A host can override the field class.
 - Empty nested list items are not parsed by Markmap. The editor inserts a placeholder label instead.
