@@ -28,6 +28,7 @@ The editor:
 - The host gives the container a size and, when needed, the editor sets `position: relative` and restores it on destroy.
 - The field styling is approximate: it inherits the host font and uses a small default padding. A host can override the field class.
 - Empty nested list items are not parsed by Markmap. The editor inserts a placeholder label instead.
+- An empty field of a newly inserted node maps Backspace or Delete to the delete command, so stepping back out of a new node closes the field and selects the node before it.
 - An outdent moves a node between source ranges, so a fold on the moved node resets. Folds on other nodes survive through the offset map.
 - Undo inside the field is native until the label is committed; document undo uses the editor history.
 
