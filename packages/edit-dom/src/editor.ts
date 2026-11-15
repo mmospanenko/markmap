@@ -396,7 +396,7 @@ export class MarkmapEditor {
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      this.commitAndInsert('insertSibling');
+      this.commitEditing();
       return;
     }
     if (event.key === 'Tab') {
@@ -497,7 +497,7 @@ export class MarkmapEditor {
     this.stopEditingUi();
   }
 
-  private commitAndInsert(kind: 'insertSibling' | 'insertChild' | 'outdent'): void {
+  private commitAndInsert(kind: 'insertChild' | 'outdent'): void {
     const before = this.snapshot();
     const state = this.commitEditing({ history: false });
     if (state === 'error') return;
@@ -509,7 +509,7 @@ export class MarkmapEditor {
       return;
     }
     const result = this.apply({
-      type: kind === 'insertSibling' && node.kind === 'root' ? 'insertChild' : kind,
+      type: kind,
       node: node.id,
       text: this.placeholder,
     });
