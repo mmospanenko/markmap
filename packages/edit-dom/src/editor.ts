@@ -475,10 +475,17 @@ export class MarkmapEditor {
     const scale = this.view.scale;
     const fontSize = Number.parseFloat(getComputedStyle(field).fontSize) || 16;
     const lineHeight = 20;
-    const textWidth = field.value.length * fontSize * 0.85 + 16;
+    const context = field.ownerDocument.createElement('canvas').getContext('2d');
+    if (context) context.font = getComputedStyle(field).font;
+    const textWidth =
+      field.value.split('\n').reduce((max, line) => {
+        if (!context) return Math.max(max, line.length * fontSize * 0.85);
+        return Math.max(max, context.measureText(line).width);
+      }, 0) + 16;
     const width = Math.max(rect.width / scale, textWidth, 40);
     const rows = field.value.split('\n').length;
-    field.style.left = `${rect.x - box.x}px`;
+    const center = rect.x + rect.width / 2;
+    field.style.left = `${center - (width * scale) / 2 - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
     field.style.width = `${width}px`;
     field.style.height = `${Math.max(1, rect.height / scale, rows * lineHeight)}px`;
