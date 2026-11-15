@@ -1,4 +1,11 @@
-import { EditError, applyCommand, mapOffset, type Command, type EditResult } from '@markmap/edit';
+import {
+  EditError,
+  applyCommand,
+  lineEnding,
+  mapOffset,
+  type Command,
+  type EditResult,
+} from '@markmap/edit';
 import {
   labelText,
   nodeAtOffset,
@@ -253,6 +260,25 @@ export class MarkmapEditor {
     if (!result) return false;
     this.history.push(before);
     return true;
+  }
+
+  selectedBlock(): string | null {
+    const node = this.selectedNode();
+    if (!node) return null;
+    if (node.block) return this.doc.source.slice(node.block.start, node.block.end);
+    if (node.id !== this.doc.root) return null;
+    const children = node.children
+      .map((id) => this.doc.nodes.get(id))
+      .filter((child): child is EditNode => Boolean(child?.block));
+    const first = children[0];
+    const last = children[children.length - 1];
+    const body =
+      first?.block && last?.block ? this.doc.source.slice(first.block.start, last.block.end) : '';
+    const title = this.title.replace(/\s+/gu, ' ').trim();
+    if (!title) return body || null;
+    const heading = `# ${title}`;
+    const ending = lineEnding(this.doc.source);
+    return body ? `${heading}${ending}${ending}${body}` : heading;
   }
 
   insertBlock(text: string): boolean {

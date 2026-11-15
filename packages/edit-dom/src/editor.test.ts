@@ -468,6 +468,26 @@ describe('MarkmapEditor', () => {
     expect(changes).toHaveLength(1);
   });
 
+  it('[TC-2-19-4] exposes the selected block and a synthesized title root', () => {
+    const { container, view, editor } = setup('- a\n  - b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    expect(editor.selectedBlock()).toBe('- a\n  - b');
+    clickNode(container, view, editor.document.root);
+    expect(editor.selectedBlock()).toBe('- a\n  - b\n- c');
+
+    const title = setup('---\ntitle: Root title\n---\n\n## Branch\n\n- Leaf\n');
+    clickNode(title.container, title.view, title.editor.document.root);
+    expect(title.editor.selectedBlock()).toBe('# Root title\n\n## Branch\n\n- Leaf\n');
+
+    const emptyTitle = setup('---\ntitle: Root title\n---\n');
+    clickNode(emptyTitle.container, emptyTitle.view, emptyTitle.editor.document.root);
+    expect(emptyTitle.editor.selectedBlock()).toBe('# Root title');
+
+    const empty = setup('');
+    clickNode(empty.container, empty.view, empty.editor.document.root);
+    expect(empty.editor.selectedBlock()).toBeNull();
+  });
+
   it('[TC-2-19-3] deletes the selected subtree and rejects the root', () => {
     const { container, view, editor, errors } = setup('- a\n  - b\n- c\n');
     clickNode(container, view, nodeId(editor, 'a'));
