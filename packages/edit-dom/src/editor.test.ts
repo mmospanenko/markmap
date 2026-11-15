@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { MarkmapNode, Rect } from '@markmap/core';
+import type { MarkmapNode, Rect, Side } from '@markmap/core';
 import { labelText, type Document } from '@markmap/model';
 import type { Markmap } from '@markmap/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ class FakeView implements EditView {
   hit: { kind: string; nodeId?: string } | undefined;
   focused: string[] = [];
   rects = new Map<string, Rect | undefined>();
+  directions = new Map<string, Side>();
   private listeners = new Map<string, Set<() => void>>();
 
   get foldedIds(): ReadonlySet<string> {
@@ -49,6 +50,10 @@ class FakeView implements EditView {
   screenRect(id: string): Rect | undefined {
     if (this.rects.has(id)) return this.rects.get(id);
     return { x: 10, y: 20, width: 100, height: 30 };
+  }
+
+  direction(id: string): Side | undefined {
+    return this.directions.get(id);
   }
 
   hitAt(): { kind: string; nodeId?: string } | undefined {
@@ -395,6 +400,42 @@ describe('MarkmapEditor', () => {
     expect(element.style.transform).toBe('scale(2)');
   });
 
+  it('[TC-2-15-1] grows a start-aligned field to the right', () => {
+    const { container, view, editor } = setup();
+    view.directions.set(nodeId(editor, 'a'), 'right');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    const element = field(container);
+    expect(element.style.textAlign).toBe('left');
+    expect(element.style.left).toBe('10px');
+    expect(parseFloat(element.style.width)).toBeGreaterThan(100);
+  });
+
+  it('[TC-2-15-2] grows an end-aligned field to the left', () => {
+    const { container, view, editor } = setup();
+    view.directions.set(nodeId(editor, 'a'), 'left');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    const element = field(container);
+    expect(element.style.textAlign).toBe('right');
+    expect(parseFloat(element.style.left) + parseFloat(element.style.width)).toBeCloseTo(110);
+    expect(parseFloat(element.style.width)).toBeGreaterThan(100);
+  });
+
+  it('[TC-2-15-3] grows a centered field from its center', () => {
+    const { container, view, editor } = setup();
+    view.directions.set(nodeId(editor, 'a'), 'top');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'a much longer label');
+    const element = field(container);
+    expect(element.style.textAlign).toBe('center');
+    expect(parseFloat(element.style.left) + parseFloat(element.style.width) / 2).toBeCloseTo(60);
+    expect(parseFloat(element.style.width)).toBeGreaterThan(100);
+  });
+
   it('[TC-2-8-1] emits changes and accepts a new source', () => {
     const { container, view, editor, changes } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
@@ -720,6 +761,7 @@ describe('createEditView', () => {
       toggle: vi.fn<(id: string) => void>(),
       focusNode: vi.fn<(id: string, options?: { animate?: boolean }) => boolean>(),
       screenRect: vi.fn<(id: string) => Rect | undefined>(),
+      result: { layout: { byId: new Map([['a', { direction: 'left' as const }]]) } },
       hitAt: vi.fn<(x: number, y: number) => { kind: string; nodeId?: string } | undefined>(),
       layoutPoint: vi.fn<(clientX: number, clientY: number) => [number, number]>(),
       on: vi.fn<(kind: string, listener: () => void) => () => void>(),
@@ -728,6 +770,10 @@ describe('createEditView', () => {
     expect(view.element).toBe(element);
     expect(view.scale).toBe(2);
     expect(view.foldedIds).toBe(mm.foldedIds);
+    expect(view.direction('a')).toBe('left');
+    expect(view.direction('b')).toBeUndefined();
+    const emptyView = createEditView({ ...mm, result: undefined } as unknown as Markmap);
+    expect(emptyView.direction('a')).toBeUndefined();
     view.setTree({ id: 'root' } as MarkmapNode);
     view.setFolded('a', true);
     view.setFoldedIds(['a']);
