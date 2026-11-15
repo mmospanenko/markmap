@@ -27,7 +27,7 @@ Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the c
 | Requirement | Tests                   |
 | ----------- | ----------------------- |
 | REQ-1-1     | TC-1-1-1 ... TC-1-1-4   |
-| REQ-1-2     | TC-1-2-1 ... TC-1-2-21  |
+| REQ-1-2     | TC-1-2-1 ... TC-1-2-22  |
 | REQ-1-3     | TC-1-3-1 ... TC-1-3-7   |
 | REQ-1-4     | TC-1-4-1                |
 | REQ-1-5     | TC-1-5-1 ... TC-1-5-4   |

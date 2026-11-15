@@ -641,6 +641,7 @@ describe('createEditView', () => {
     const element = document.createElement('div');
     const mm = {
       element,
+      transform: { k: 2 },
       foldedIds: new Set<string>(),
       setTree: vi.fn<(root: MarkmapNode) => void>(),
       setFolded: vi.fn<(id: string, folded: boolean) => void>(),
@@ -654,6 +655,7 @@ describe('createEditView', () => {
     };
     const view = createEditView(mm as unknown as Markmap);
     expect(view.element).toBe(element);
+    expect(view.scale).toBe(2);
     expect(view.foldedIds).toBe(mm.foldedIds);
     view.setTree({ id: 'root' } as MarkmapNode);
     view.setFolded('a', true);
@@ -743,12 +745,12 @@ describe('Empty document', () => {
     expect(editor.source).toBe('');
   });
 
-  it('[TC-2-14-7] appends the first heading after frontmatter', () => {
-    const { container, editor } = setup('---\ntitle: T\n---\n');
+  it('[TC-2-14-7] reports a notice for a root label from frontmatter', () => {
+    const { container, editor, errors } = setup('---\ntitle: T\n---\n');
     key(container, 'F2');
-    type(container, 'First note');
-    editor.commit();
-    expect(editor.source).toBe('---\ntitle: T\n---\n# First note\n');
+    expect(editor.isEditing).toBe(false);
+    expect(errors[0]?.message).toContain('frontmatter');
+    expect(editor.source).toBe('---\ntitle: T\n---\n');
   });
 });
 
@@ -782,5 +784,17 @@ describe('History', () => {
       }
     }
     expect(count).toBe(100);
+  });
+
+  it('[TC-2-6-2] resets the field with Cmd+Z before undoing the document', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'F2');
+    type(container, 'ab');
+
+    key(field(container), 'z', { metaKey: true });
+    expect(field(container).value).toBe('a');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
   });
 });

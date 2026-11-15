@@ -33,7 +33,7 @@ function modelError(fn: () => void): ModelError {
 }
 
 describe('validation', () => {
-  it('[TC-1-2-10] reports a missing or misplaced root', () => {
+  it('[TC-1-2-22] reports a missing or misplaced root', () => {
     const missing = buildDocument('- a');
     missing.nodes.delete(missing.root);
     expect(codes(missing)).toContain('E_ROOT');

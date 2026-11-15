@@ -21,6 +21,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-11] The editor shall provide an adapter from a `Markmap` instance to the `EditView` contract.
 - [REQ-2-12] The history shall keep the last hundred entries and expose undo and redo state.
 - [REQ-2-13] The editor shall handle boundary keys, clicks, source replacement, shared styles and repeated destruction without changing the document.
+- [REQ-2-14] When the document is empty, the editor shall open an editable first node and keep the source unchanged until its label is committed, hide the empty selection frame, and report a notice instead of editing a root label that comes from the frontmatter title.
 
 ## Acceptance tests
 
@@ -29,9 +30,9 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-1     | TC-2-1-1, TC-2-1-2       |
 | REQ-2-2     | TC-2-2-1 ... TC-2-2-3    |
 | REQ-2-3     | TC-2-3-1 ... TC-2-3-3    |
-| REQ-2-4     | TC-2-4-1, TC-2-4-2       |
+| REQ-2-4     | TC-2-4-1 ... TC-2-4-7    |
 | REQ-2-5     | TC-2-5-1, TC-2-5-2       |
-| REQ-2-6     | TC-2-6-1                 |
+| REQ-2-6     | TC-2-6-1, TC-2-6-2       |
 | REQ-2-7     | TC-2-7-1                 |
 | REQ-2-8     | TC-2-8-1                 |
 | REQ-2-9     | TC-2-9-1                 |
@@ -39,6 +40,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-11    | TC-2-11-1                |
 | REQ-2-12    | TC-2-12-1, TC-2-12-2     |
 | REQ-2-13    | TC-2-13-1 ... TC-2-13-22 |
+| REQ-2-14    | TC-2-14-1 ... TC-2-14-7  |
 
 ## Decisions
 
