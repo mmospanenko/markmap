@@ -1215,6 +1215,25 @@ describe('MarkmapEditor notes', () => {
     expect(down.defaultPrevented).toBe(true);
   });
 
+  it('[TC-3-8-8] gives every toolbar button a matching outline icon and title', () => {
+    const { container, view, editor } = setup('- a\n');
+    openNotes(container, view, editor, 'a');
+    const buttons = Array.from(notesPanel(container)?.querySelectorAll('button') ?? []);
+    expect(buttons).toHaveLength(6);
+    for (const button of buttons) {
+      const name = button.getAttribute('aria-label');
+      expect(button.getAttribute('title')).toBe(name);
+      const icon = button.querySelector('svg');
+      expect(icon?.getAttribute('viewBox')).toBe('0 0 16 16');
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+      const path = icon?.querySelector('path');
+      expect(path?.getAttribute('fill')).toBe('none');
+      expect(path?.getAttribute('stroke')).toBe('currentColor');
+      expect(path?.getAttribute('stroke-linecap')).toBe('round');
+      expect(path?.getAttribute('stroke-linejoin')).toBe('round');
+    }
+  });
+
   it('[TC-3-9-1] cancels notes with Escape without a source change', () => {
     const { container, view, editor, changes } = setup('- a\n');
     const notes = openNotes(container, view, editor, 'a');
@@ -1367,6 +1386,51 @@ describe('MarkmapEditor notes', () => {
     view.emit('render');
     expect(editor.isEditingNotes).toBe(false);
     expect(notesPanel(container)).toBeNull();
+  });
+
+  it('[TC-3-7-5] adds a compact header with a pencil icon and a muted label', () => {
+    const { container, view, editor } = setup('- a\n');
+    openNotes(container, view, editor, 'a');
+    const header = notesPanel(container)?.querySelector<HTMLElement>('.mm-editor-notes-header');
+    const icon = header?.querySelector('svg[aria-hidden="true"]');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 16 16');
+    const path = icon?.querySelector('path');
+    expect(path?.getAttribute('d')).toBe(
+      'M3 13l1-3.4L11 2.6a1.7 1.7 0 0 1 2.4 2.4L6.4 12 3 13zM9.9 3.7l2.4 2.4',
+    );
+    expect(path?.getAttribute('d')).not.toBe('M4 2.5h5l3 3v8H4zM9 2.5v3h3M6.2 8h3.6M6.2 10.5h3.6');
+    expect(header?.querySelector('.mm-editor-notes-title')?.textContent).toBe('Notes');
+    expect(header?.querySelector('.mm-editor-notes-label')?.textContent).toBe('Markdown');
+    const style = document.getElementById('mm-editor-style')?.textContent ?? '';
+    expect(style).toContain('.mm-editor-notes-icon{flex:none;width:16px;height:16px;');
+  });
+
+  it('[TC-3-11-1] draws the panel from host theme tokens with theme-aware fallbacks', () => {
+    setup();
+    const style = document.getElementById('mm-editor-style')?.textContent ?? '';
+    for (const token of [
+      '--oc-elevated',
+      '--oc-fg',
+      '--oc-bg',
+      '--oc-border',
+      '--oc-hover',
+      '--oc-focus',
+      '--oc-radius',
+      '--oc-muted',
+    ]) {
+      expect(style).toContain(token);
+    }
+    for (const alias of [
+      '--oc-editor-background',
+      '--oc-background',
+      '--oc-foreground',
+      '--oc-button-background',
+      '--oc-input-background',
+    ]) {
+      expect(style).not.toContain(alias);
+    }
+    expect(style).toContain('background:var(--oc-elevated,light-dark(#fff,#1f1f1f))');
+    expect(style).toContain('background:var(--oc-bg,light-dark(#fff,#141414))');
   });
 
   it('[TC-3-9-6] routes container keys into the notes field', () => {

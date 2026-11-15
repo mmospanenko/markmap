@@ -30,25 +30,63 @@ const STYLE = `
 .mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto;transform-origin:top left}
 .mm-editor-selection{position:absolute;display:none;pointer-events:none;box-sizing:border-box;border:2px solid var(--oc-focus,#0097e6);border-radius:6px}
 .mm-editor-editing text{visibility:hidden}
-.mm-editor-notes{position:absolute;display:flex;flex-direction:column;gap:6px;padding:8px;box-sizing:border-box;background:var(--oc-editor-background,var(--oc-background,#fff));color:var(--oc-foreground,#1f2328);border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);pointer-events:auto;z-index:3;font:inherit;text-align:left;overflow:hidden}
+.mm-editor-notes{position:absolute;display:flex;flex-direction:column;gap:8px;padding:10px;box-sizing:border-box;background:var(--oc-elevated,light-dark(#fff,#1f1f1f));color:var(--oc-fg,light-dark(#1f2328,#e6e3df));border:1px solid var(--oc-border,light-dark(rgba(0,0,0,.14),rgba(255,255,255,.16)));border-radius:var(--oc-radius,8px);box-shadow:0 10px 28px rgba(0,0,0,.18);pointer-events:auto;z-index:3;font:inherit;text-align:left;overflow:hidden}
+.mm-editor-notes-header{display:flex;align-items:center;gap:6px;min-height:20px;padding:0 2px 8px;border-bottom:1px solid var(--oc-border,light-dark(rgba(0,0,0,.1),rgba(255,255,255,.12)))}
+.mm-editor-notes-icon{flex:none;width:16px;height:16px;color:var(--oc-muted,light-dark(#656d76,#9aa0a6))}
+.mm-editor-notes-title{font-size:.9em;font-weight:600;line-height:1.2}
+.mm-editor-notes-label{margin-left:auto;color:var(--oc-muted,light-dark(#656d76,#9aa0a6));font-size:.75em;line-height:1.2;letter-spacing:.02em}
 .mm-editor-notes-toolbar{display:flex;flex-wrap:wrap;gap:4px}
-.mm-editor-notes-toolbar button{margin:0;padding:2px 6px;border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:4px;background:var(--oc-button-background,transparent);color:inherit;font:inherit;font-size:.85em;line-height:1.4;cursor:pointer}
-.mm-editor-notes-toolbar button:hover{border-color:var(--oc-focus,#0097e6)}
-.mm-editor-notes-field{flex:1 1 auto;min-height:96px;margin:0;padding:6px 8px;border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:6px;background:var(--oc-input-background,var(--oc-background,#fff));color:inherit;font:inherit;line-height:1.4;resize:none;overflow:auto;outline:none;box-sizing:border-box}
-.mm-editor-notes-field:focus{border-color:var(--oc-focus,#0097e6)}
+.mm-editor-notes-toolbar button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin:0;padding:0;border:1px solid transparent;border-radius:calc(var(--oc-radius,8px) - 2px);background:transparent;color:inherit;font:inherit;line-height:1;cursor:pointer}
+.mm-editor-notes-toolbar button:hover{background:var(--oc-hover,light-dark(rgba(0,0,0,.06),rgba(255,255,255,.08)));border-color:var(--oc-border,light-dark(rgba(0,0,0,.14),rgba(255,255,255,.16)))}
+.mm-editor-notes-toolbar button:focus-visible{outline:2px solid var(--oc-focus,#0097e6);outline-offset:1px}
+.mm-editor-notes-toolbar svg{display:block;width:16px;height:16px}
+.mm-editor-notes-field{flex:1 1 auto;min-height:96px;margin:0;padding:8px 10px;border:1px solid var(--oc-border,light-dark(rgba(0,0,0,.14),rgba(255,255,255,.16)));border-radius:calc(var(--oc-radius,8px) - 2px);background:var(--oc-bg,light-dark(#fff,#141414));color:inherit;font:inherit;line-height:1.45;resize:none;overflow:auto;outline:none;box-sizing:border-box}
+.mm-editor-notes-field:focus{border-color:var(--oc-focus,#0097e6);box-shadow:0 0 0 2px color-mix(in srgb,var(--oc-focus,#0097e6) 20%,transparent)}
 `;
 const styleUsers = new WeakMap<Document, number>();
 
 type NoteFormat = 'bold' | 'italic' | 'code' | 'link' | 'quote' | 'block';
 
-const NOTE_ACTIONS: ReadonlyArray<{ format: NoteFormat; name: string; text: string }> = [
-  { format: 'bold', name: 'Bold', text: 'B' },
-  { format: 'italic', name: 'Italic', text: 'I' },
-  { format: 'code', name: 'Inline code', text: '`' },
-  { format: 'link', name: 'Link', text: 'Link' },
-  { format: 'quote', name: 'Quote', text: '>' },
-  { format: 'block', name: 'Code block', text: '{ }' },
+const NOTE_ICON = 'M3 13l1-3.4L11 2.6a1.7 1.7 0 0 1 2.4 2.4L6.4 12 3 13zM9.9 3.7l2.4 2.4';
+
+const NOTE_ACTIONS: ReadonlyArray<{ format: NoteFormat; name: string; icon: string }> = [
+  {
+    format: 'bold',
+    name: 'Bold',
+    icon: 'M5 3h3.3a2.35 2.35 0 0 1 0 4.7H5zM5 7.7h3.9a2.65 2.65 0 0 1 0 5.3H5z',
+  },
+  { format: 'italic', name: 'Italic', icon: 'M6.8 3h4.7M4.5 13h4.7M9.6 3 7 13' },
+  { format: 'code', name: 'Inline code', icon: 'M5.8 5.2 3 8l2.8 2.8M10.2 5.2 13 8l-2.8 2.8' },
+  {
+    format: 'link',
+    name: 'Link',
+    icon: 'M6.7 9.3a2.4 2.4 0 0 0 3.4 0l1.8-1.8A2.4 2.4 0 0 0 8.5 4.1L7.4 5.2M9.3 6.7a2.4 2.4 0 0 0-3.4 0L4.1 8.5a2.4 2.4 0 0 0 3.4 3.4l1.1-1.1',
+  },
+  { format: 'quote', name: 'Quote', icon: 'M3.5 4v8M6.5 5h6M6.5 8h6M6.5 11h4' },
+  {
+    format: 'block',
+    name: 'Code block',
+    icon: 'M2.8 3.8h10.4v8.4H2.8zM6.4 6.6 4.8 8l1.6 1.4M9.6 6.6 11.2 8l-1.6 1.4',
+  },
 ];
+
+function noteIcon(doc: Document, path: string): SVGElement {
+  const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const shape = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+  shape.setAttribute('d', path);
+  shape.setAttribute('fill', 'none');
+  shape.setAttribute('stroke', 'currentColor');
+  shape.setAttribute('stroke-width', '1.5');
+  shape.setAttribute('stroke-linecap', 'round');
+  shape.setAttribute('stroke-linejoin', 'round');
+  svg.append(shape);
+  return svg;
+}
 
 function acquireStyle(doc: Document): void {
   const count = styleUsers.get(doc) ?? 0;
@@ -611,6 +649,18 @@ export class MarkmapEditor {
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'Notes');
 
+    const header = doc.createElement('div');
+    header.className = 'mm-editor-notes-header';
+    const icon = noteIcon(doc, NOTE_ICON);
+    icon.classList.add('mm-editor-notes-icon');
+    const title = doc.createElement('span');
+    title.className = 'mm-editor-notes-title';
+    title.textContent = 'Notes';
+    const label = doc.createElement('span');
+    label.className = 'mm-editor-notes-label';
+    label.textContent = 'Markdown';
+    header.append(icon, title, label);
+
     const toolbar = doc.createElement('div');
     toolbar.className = 'mm-editor-notes-toolbar';
     toolbar.addEventListener('mousedown', (event) => event.preventDefault());
@@ -619,7 +669,8 @@ export class MarkmapEditor {
       button.type = 'button';
       button.className = 'mm-editor-notes-button';
       button.setAttribute('aria-label', action.name);
-      button.textContent = action.text;
+      button.setAttribute('title', action.name);
+      button.append(noteIcon(doc, action.icon));
       button.addEventListener('click', () => this.formatNotes(action.format));
       toolbar.append(button);
     }
@@ -630,7 +681,7 @@ export class MarkmapEditor {
     field.spellcheck = false;
     field.value = notesText(this.doc, node);
 
-    panel.append(toolbar, field);
+    panel.append(header, toolbar, field);
     this.layer.append(panel);
     this.notes = { nodeId: node.id, original: field.value, panel, field };
     doc.addEventListener('mousedown', this.handleDocumentMouseDown);
