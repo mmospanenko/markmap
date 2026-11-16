@@ -5,6 +5,7 @@ export type EditErrorCode =
   | 'E_SPLICE'
   | 'E_SHAPE'
   | 'E_LEVEL'
+  | 'E_CYCLE'
   | 'E_INDENT';
 
 export class EditError extends Error {

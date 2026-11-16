@@ -6,6 +6,7 @@ import {
   type Command,
   type EditResult,
 } from '@markmap/edit';
+import type { Rect } from '@markmap/core';
 import {
   labelText,
   nodeAtOffset,
@@ -21,6 +22,11 @@ const STYLE_ID = 'mm-editor-style';
 const MODE_SELECT = 'mm-editor-mode-select';
 const MODE_EDIT = 'mm-editor-mode-edit';
 const EMPTY_LABEL = '\u200B';
+const DRAG_THRESHOLD = 4;
+const DRAG_EDGE = 60;
+const DRAG_PAN_MAX = 14;
+const DRAG_EXPAND_MS = 400;
+const SNAP_BACK_MS = 140;
 
 type CommandWithoutNode = {
   [K in Command['type']]: Omit<Extract<Command, { type: K }>, 'node'>;
@@ -36,6 +42,13 @@ const STYLE = `
 .mm-editor-notes-toolbar button:hover{border-color:var(--oc-focus,#0097e6)}
 .mm-editor-notes-field{flex:1 1 auto;min-height:96px;margin:0;padding:6px 8px;border:1px solid var(--oc-border,rgba(128,128,128,.4));border-radius:6px;background:var(--oc-input-background,var(--oc-background,#fff));color:inherit;font:inherit;line-height:1.4;resize:none;overflow:auto;outline:none;box-sizing:border-box}
 .mm-editor-notes-field:focus{border-color:var(--oc-focus,#0097e6)}
+.mm-editor-drag-ghost{pointer-events:none}
+.mm-editor-drag-ghost [data-key]{opacity:.92;filter:drop-shadow(0 6px 16px rgba(0,0,0,.28))}
+.mm-editor-drag-source{opacity:.35}
+.mm-editor-drop{position:absolute;display:none;pointer-events:none;box-sizing:border-box;z-index:2}
+.mm-editor-drop-line{background:var(--oc-focus,#0097e6);border-radius:999px}
+.mm-editor-drop-frame{border:2px solid var(--oc-focus,#0097e6);border-radius:8px}
+.mm-editor-dragging{cursor:grabbing;user-select:none}
 `;
 const styleUsers = new WeakMap<Document, number>();
 
@@ -95,11 +108,48 @@ interface NotesEditing {
   field: HTMLTextAreaElement;
 }
 
+type DropKind = 'before' | 'after' | 'child';
+
+interface DropTarget {
+  parentId: string;
+  index: number;
+  kind: DropKind;
+  targetId: string;
+}
+
+interface DragState {
+  nodeId: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  clientX: number;
+  clientY: number;
+  active: boolean;
+  ghost: SVGElement | null;
+  sourceIds: string[];
+  folds: string[];
+  target: DropTarget | null;
+  hover: number | null;
+  pan: number | null;
+  win: Window;
+}
+
+function sameTarget(left: DropTarget | null, right: DropTarget | null): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.parentId === right.parentId &&
+    left.index === right.index &&
+    left.kind === right.kind &&
+    left.targetId === right.targetId
+  );
+}
+
 export class MarkmapEditor {
   private readonly view: EditView;
   private readonly container: HTMLElement;
   private readonly field: HTMLTextAreaElement;
   private readonly selectionBox: HTMLDivElement;
+  private readonly indicator: HTMLDivElement;
   private readonly layer: HTMLDivElement;
   private readonly history = new History();
   private readonly onChange?: (change: EditorChange) => void;
@@ -114,6 +164,8 @@ export class MarkmapEditor {
   private selectionOffset = 0;
   private editing: Editing | null = null;
   private notes: NotesEditing | null = null;
+  private drag: DragState | null = null;
+  private suppressClick = false;
   private previewing = false;
   private destroyed = false;
 
@@ -139,6 +191,8 @@ export class MarkmapEditor {
     this.layer.className = 'mm-editor-layer';
     this.selectionBox = doc.createElement('div');
     this.selectionBox.className = 'mm-editor-selection';
+    this.indicator = doc.createElement('div');
+    this.indicator.className = 'mm-editor-drop';
     this.field = doc.createElement('textarea');
     this.field.className = 'mm-editor-field';
     this.field.spellcheck = false;
@@ -146,12 +200,14 @@ export class MarkmapEditor {
     this.field.setAttribute('autocapitalize', 'off');
     this.field.setAttribute('wrap', 'soft');
     this.field.addEventListener('input', this.handleInput);
-    this.layer.append(this.selectionBox, this.field);
+    this.layer.append(this.selectionBox, this.indicator, this.field);
     container.append(this.layer);
 
     container.addEventListener('keydown', this.handleKeyDown);
     container.addEventListener('click', this.handleClick);
     container.addEventListener('dblclick', this.handleDoubleClick);
+    container.addEventListener('pointerdown', this.handlePointerDown, true);
+    container.addEventListener('mousedown', this.handleMouseDown, true);
     this.stops.push(this.view.on('render', this.handleViewChange));
     this.stops.push(this.view.on('zoom', this.handleViewChange));
 
@@ -395,7 +451,10 @@ export class MarkmapEditor {
     this.container.removeEventListener('keydown', this.handleKeyDown);
     this.container.removeEventListener('click', this.handleClick);
     this.container.removeEventListener('dblclick', this.handleDoubleClick);
+    this.container.removeEventListener('pointerdown', this.handlePointerDown, true);
+    this.container.removeEventListener('mousedown', this.handleMouseDown, true);
     this.field.removeEventListener('input', this.handleInput);
+    this.cancelDrag();
     this.closeNotes(false);
     this.layer.remove();
     releaseStyle(this.container.ownerDocument);
@@ -420,9 +479,19 @@ export class MarkmapEditor {
     if (this.editing) this.positionEditing();
     this.paintSelection();
     this.paintEditing();
+    const drag = this.drag;
+    if (drag?.active) {
+      this.paintDragSource(drag);
+      this.paintDropTarget(drag);
+    }
   };
 
   private handleClick = (event: MouseEvent): void => {
+    if (this.suppressClick) {
+      this.suppressClick = false;
+      event.preventDefault();
+      return;
+    }
     const target = event.target;
     if (this.notes) {
       if (target instanceof Node && this.notes.panel.contains(target)) return;
@@ -448,6 +517,551 @@ export class MarkmapEditor {
     }
   };
 
+  private handleMouseDown = (event: MouseEvent): void => {
+    if (event.button !== 0) return;
+    if (this.notes) {
+      const target = event.target;
+      if (!(target instanceof Node) || !this.notes.panel.contains(target)) {
+        if (this.commitNotes({ keepOpen: false }) === 'error') {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
+    }
+    if (!this.dragNodeAt(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  private handlePointerDown = (event: PointerEvent): void => {
+    if (event.pointerType === 'touch') return;
+    if (event.button !== 0 || event.isPrimary === false) return;
+    if (this.destroyed) return;
+    if (this.notes) {
+      const target = event.target;
+      if (!(target instanceof Node) || !this.notes.panel.contains(target)) {
+        if (this.commitNotes({ keepOpen: false }) === 'error') return;
+      }
+    }
+    const nodeId = this.dragNodeAt(event);
+    if (!nodeId) return;
+    const node = this.doc.nodes.get(nodeId);
+    if (!node?.capabilities.move) return;
+    if (this.editing && this.commitEditing() === 'error') return;
+    const win = this.container.ownerDocument.defaultView;
+    if (!win) return;
+    this.drag = {
+      nodeId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      active: false,
+      ghost: null,
+      sourceIds: this.subtreeIds(nodeId),
+      folds: [...this.view.foldedIds],
+      target: null,
+      hover: null,
+      pan: null,
+      win,
+    };
+    win.addEventListener('pointermove', this.handlePointerMove, true);
+    win.addEventListener('pointerup', this.handlePointerUp, true);
+    win.addEventListener('pointercancel', this.handlePointerCancel, true);
+    win.addEventListener('keydown', this.handleDragKey, true);
+  };
+
+  private handlePointerMove = (event: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.clientX = event.clientX;
+    drag.clientY = event.clientY;
+    if (!drag.active) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < DRAG_THRESHOLD) {
+        return;
+      }
+      this.startDrag(drag);
+      return;
+    }
+    this.updateDrag(drag);
+  };
+
+  private handlePointerUp = (event: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!drag.active) {
+      this.finishDrag(false);
+      return;
+    }
+    drag.clientX = event.clientX;
+    drag.clientY = event.clientY;
+    this.updateDrag(drag);
+    this.finishDrag(drag.target !== null);
+  };
+
+  private handlePointerCancel = (): void => {
+    this.finishDrag(false);
+  };
+
+  private handleDragKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.finishDrag(false);
+  };
+
+  private dragNodeAt(event: {
+    target: EventTarget | null;
+    clientX: number;
+    clientY: number;
+  }): string | null {
+    const target = event.target;
+    if (target instanceof Node) {
+      if (this.field.contains(target)) return null;
+      if (this.notes?.panel.contains(target)) return null;
+    }
+    const hit = this.hitAt(event);
+    return hit?.kind === 'node' && hit.nodeId ? hit.nodeId : null;
+  }
+
+  private startDrag(drag: DragState): void {
+    drag.active = true;
+    this.select(drag.nodeId, { reveal: false });
+    this.container.classList.add('mm-editor-dragging');
+    if (typeof this.container.setPointerCapture === 'function') {
+      this.container.setPointerCapture(drag.pointerId);
+    }
+    const ghost = this.buildGhost(drag.nodeId, drag.sourceIds);
+    drag.ghost = ghost;
+    this.view.element.append(ghost);
+    this.paintDragSource(drag);
+    this.updateDrag(drag);
+  }
+
+  private updateDrag(drag: DragState): void {
+    if (drag.ghost) {
+      drag.ghost.style.transform = `translate(${drag.clientX - drag.startX}px, ${
+        drag.clientY - drag.startY
+      }px)`;
+    }
+    const next = this.dropTargetAt(drag, drag.clientX, drag.clientY);
+    if (!sameTarget(drag.target, next)) {
+      drag.target = next;
+      this.paintDropTarget(drag);
+      this.scheduleHover(drag);
+    }
+    this.updateAutoPan(drag);
+  }
+
+  private buildGhost(nodeId: string, ids: string[]): SVGElement {
+    const svg = this.view.element;
+    const ghost = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');
+    ghost.classList.add('mm-editor-drag-ghost');
+    const content = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const { k, x, y } = this.view.transform;
+    content.setAttribute('transform', `matrix(${k} 0 0 ${k} ${x} ${y})`);
+    const keys = new Set<string>();
+    for (const id of ids) {
+      keys.add(`node:${id}`);
+      if (id !== nodeId) keys.add(`edge:${id}`);
+    }
+    for (const element of svg.querySelectorAll('[data-key]')) {
+      const key = element.getAttribute('data-key');
+      if (key && keys.has(key)) content.append(element.cloneNode(true));
+    }
+    ghost.append(content);
+    return ghost;
+  }
+
+  private paintDragSource(drag: DragState): void {
+    this.clearDragSource();
+    for (const id of drag.sourceIds) {
+      this.view.element
+        .querySelector(`[data-key="node:${id}"]`)
+        ?.classList.add('mm-editor-drag-source');
+      this.view.element
+        .querySelector(`[data-key="edge:${id}"]`)
+        ?.classList.add('mm-editor-drag-source');
+    }
+  }
+
+  private clearDragSource(): void {
+    for (const element of this.view.element.querySelectorAll('.mm-editor-drag-source')) {
+      element.classList.remove('mm-editor-drag-source');
+    }
+  }
+
+  private paintDropTarget(drag: DragState): void {
+    const target = drag.target;
+    const rect = target ? this.view.screenRect(target.targetId) : undefined;
+    if (!target || !rect) {
+      this.indicator.style.display = 'none';
+      return;
+    }
+    const box = this.container.getBoundingClientRect();
+    const style = this.indicator.style;
+    this.indicator.className = 'mm-editor-drop';
+    if (target.kind === 'child') {
+      this.indicator.classList.add('mm-editor-drop-frame');
+      style.left = `${rect.x - box.x - 3}px`;
+      style.top = `${rect.y - box.y - 3}px`;
+      style.width = `${rect.width + 6}px`;
+      style.height = `${rect.height + 6}px`;
+    } else {
+      this.indicator.classList.add('mm-editor-drop-line');
+      if (this.isVertical(target.targetId)) {
+        const left = target.kind === 'before' ? rect.x - 6 : rect.x + rect.width + 4;
+        style.left = `${left - box.x}px`;
+        style.top = `${rect.y - box.y}px`;
+        style.width = '2px';
+        style.height = `${Math.max(rect.height, 24)}px`;
+      } else {
+        const top = target.kind === 'before' ? rect.y - 6 : rect.y + rect.height + 4;
+        style.left = `${rect.x - box.x}px`;
+        style.top = `${top - box.y}px`;
+        style.width = `${Math.max(rect.width, 24)}px`;
+        style.height = '2px';
+      }
+    }
+    style.display = 'block';
+  }
+
+  private dropTargetAt(drag: DragState, x: number, y: number): DropTarget | null {
+    const dragged = this.doc.nodes.get(drag.nodeId);
+    if (!dragged) return null;
+    const excluded = new Set(drag.sourceIds);
+    const boxes: Array<{ node: EditNode; rect: Rect }> = [];
+    for (const id of this.doc.order) {
+      const node = this.doc.nodes.get(id);
+      if (!node || node.id === this.doc.root || excluded.has(node.id) || node.opaque) continue;
+      const rect = this.view.screenRect(node.id);
+      if (rect) boxes.push({ node, rect });
+    }
+    for (const box of boxes) {
+      if (
+        x >= box.rect.x - 4 &&
+        x <= box.rect.x + box.rect.width + 4 &&
+        y >= box.rect.y - 4 &&
+        y <= box.rect.y + box.rect.height + 4
+      ) {
+        return this.zoneTarget(dragged, box.node, box.rect, x, y, false);
+      }
+    }
+    const root = this.doc.nodes.get(this.doc.root);
+    if (root) {
+      const rootRect = this.view.screenRect(root.id);
+      if (
+        rootRect &&
+        x >= rootRect.x - 48 &&
+        x <= rootRect.x + rootRect.width + 48 &&
+        y >= rootRect.y - 48 &&
+        y <= rootRect.y + rootRect.height + 48
+      ) {
+        return this.rootTarget(root, dragged, rootRect, x, y);
+      }
+    }
+    let nearest: { node: EditNode; rect: Rect } | null = null;
+    let distance = 24;
+    for (const box of boxes) {
+      const dx = Math.max(box.rect.x - x, 0, x - box.rect.x - box.rect.width);
+      const dy = Math.max(box.rect.y - y, 0, y - box.rect.y - box.rect.height);
+      const current = Math.hypot(dx, dy);
+      if (current <= distance) {
+        distance = current;
+        nearest = box;
+      }
+    }
+    return nearest ? this.zoneTarget(dragged, nearest.node, nearest.rect, x, y, true) : null;
+  }
+
+  private zoneTarget(
+    dragged: EditNode,
+    node: EditNode,
+    rect: Rect,
+    x: number,
+    y: number,
+    gap: boolean,
+  ): DropTarget | null {
+    const vertical = this.isVertical(node.id);
+    let kind: DropKind;
+    if (gap) {
+      const before = vertical ? x < rect.x + rect.width / 2 : y < rect.y + rect.height / 2;
+      kind = before ? 'before' : 'after';
+    } else if (vertical) {
+      const quarter = Math.max(4, rect.width / 4);
+      if (x < rect.x + quarter) kind = 'before';
+      else if (x > rect.x + rect.width - quarter) kind = 'after';
+      else kind = 'child';
+    } else {
+      const quarter = Math.max(4, rect.height / 4);
+      if (y < rect.y + quarter) kind = 'before';
+      else if (y > rect.y + rect.height - quarter) kind = 'after';
+      else kind = 'child';
+    }
+    if (kind === 'child') {
+      if (!node.capabilities.addChild) {
+        kind = vertical
+          ? x < rect.x + rect.width / 2
+            ? 'before'
+            : 'after'
+          : y < rect.y + rect.height / 2
+            ? 'before'
+            : 'after';
+      } else {
+        return {
+          parentId: node.id,
+          index: node.children.filter((id) => id !== dragged.id).length,
+          kind,
+          targetId: node.id,
+        };
+      }
+    }
+    const parentId = node.parent;
+    if (!parentId) return null;
+    const parent = this.doc.nodes.get(parentId);
+    if (!parent) return null;
+    const siblings = parent.children.filter((id) => id !== dragged.id);
+    const base = siblings.indexOf(node.id);
+    return {
+      parentId,
+      index: kind === 'before' ? base : base + 1,
+      kind,
+      targetId: node.id,
+    };
+  }
+
+  private rootTarget(
+    root: EditNode,
+    dragged: EditNode,
+    rootRect: Rect,
+    x: number,
+    y: number,
+  ): DropTarget | null {
+    const siblings = root.children.filter((id) => id !== dragged.id);
+    if (!siblings.length) return null;
+    const wanted = x < rootRect.x + rootRect.width / 2 ? 'left' : 'right';
+    const sided = siblings.filter((id) => this.view.direction(id) === wanted);
+    const pool = sided.length ? sided : siblings;
+    let nearest = pool[0];
+    let nearestRect = this.view.screenRect(nearest);
+    let best = Infinity;
+    for (const id of pool) {
+      const rect = this.view.screenRect(id);
+      if (!rect) continue;
+      const distance = Math.hypot(x - (rect.x + rect.width / 2), y - (rect.y + rect.height / 2));
+      if (distance < best) {
+        best = distance;
+        nearest = id;
+        nearestRect = rect;
+      }
+    }
+    if (!nearestRect) return null;
+    const vertical = this.isVertical(nearest);
+    const before = vertical
+      ? x < nearestRect.x + nearestRect.width / 2
+      : y < nearestRect.y + nearestRect.height / 2;
+    const base = siblings.indexOf(nearest);
+    return {
+      parentId: root.id,
+      index: before ? base : base + 1,
+      kind: before ? 'before' : 'after',
+      targetId: nearest,
+    };
+  }
+
+  private isVertical(id: string): boolean {
+    const direction = this.view.direction(id);
+    return direction === 'top' || direction === 'bottom';
+  }
+
+  private scheduleHover(drag: DragState): void {
+    if (drag.hover !== null) {
+      drag.win.clearTimeout(drag.hover);
+      drag.hover = null;
+    }
+    const target = drag.target;
+    if (!target || target.kind !== 'child' || !this.view.foldedIds.has(target.targetId)) return;
+    drag.hover = drag.win.setTimeout(() => {
+      drag.hover = null;
+      this.view.setFolded(target.targetId, false);
+      this.updateDrag(drag);
+    }, DRAG_EXPAND_MS);
+  }
+
+  private updateAutoPan(drag: DragState): void {
+    if (this.edgeVector(drag.clientX, drag.clientY) === null) {
+      this.stopAutoPan();
+      return;
+    }
+    if (drag.pan !== null) return;
+    const step = (): void => {
+      const current = this.drag;
+      if (!current?.active) {
+        this.stopAutoPan();
+        return;
+      }
+      const vector = this.edgeVector(current.clientX, current.clientY);
+      if (!vector) {
+        this.stopAutoPan();
+        return;
+      }
+      this.view.panBy(vector.x, vector.y);
+      current.pan = current.win.requestAnimationFrame(step);
+      this.afterPan(current);
+    };
+    drag.pan = drag.win.requestAnimationFrame(step);
+  }
+
+  private stopAutoPan(): void {
+    const drag = this.drag;
+    if (!drag || drag.pan === null) return;
+    drag.win.cancelAnimationFrame(drag.pan);
+    drag.pan = null;
+  }
+
+  private edgeVector(x: number, y: number): { x: number; y: number } | null {
+    const box = this.container.getBoundingClientRect();
+    const left = x - box.x;
+    const right = box.x + box.width - x;
+    const top = y - box.y;
+    const bottom = box.y + box.height - y;
+    const closest = Math.min(left, right, top, bottom);
+    if (closest > DRAG_EDGE) return null;
+    const speed = Math.max(1, ((DRAG_EDGE - Math.max(0, closest)) / DRAG_EDGE) * DRAG_PAN_MAX);
+    const vector = { x: 0, y: 0 };
+    if (left < DRAG_EDGE) vector.x = speed;
+    else if (right < DRAG_EDGE) vector.x = -speed;
+    if (top < DRAG_EDGE) vector.y = speed;
+    else if (bottom < DRAG_EDGE) vector.y = -speed;
+    return vector;
+  }
+
+  private afterPan(drag: DragState): void {
+    const next = this.dropTargetAt(drag, drag.clientX, drag.clientY);
+    if (!sameTarget(drag.target, next)) {
+      drag.target = next;
+      this.paintDropTarget(drag);
+      this.scheduleHover(drag);
+    }
+  }
+
+  private finishDrag(drop: boolean): void {
+    const drag = this.drag;
+    if (!drag) return;
+    this.stopAutoPan();
+    if (drag.hover !== null) {
+      drag.win.clearTimeout(drag.hover);
+      drag.hover = null;
+    }
+    drag.win.removeEventListener('pointermove', this.handlePointerMove, true);
+    drag.win.removeEventListener('pointerup', this.handlePointerUp, true);
+    drag.win.removeEventListener('pointercancel', this.handlePointerCancel, true);
+    drag.win.removeEventListener('keydown', this.handleDragKey, true);
+    if (drag.active) {
+      if (typeof this.container.releasePointerCapture === 'function') {
+        this.container.releasePointerCapture(drag.pointerId);
+      }
+      this.suppressClick = true;
+      this.applyFoldState(drag.folds);
+      if (drop && drag.target) {
+        this.moveTo(drag.target.parentId, drag.target.index, drag.nodeId);
+      }
+    }
+    const ghost = drag.ghost;
+    if (ghost) {
+      if (drag.active && !drop) {
+        ghost.style.transition = `transform ${SNAP_BACK_MS}ms ease, opacity ${SNAP_BACK_MS}ms ease`;
+        ghost.style.transform = 'translate(0px, 0px)';
+        ghost.style.opacity = '0';
+        drag.win.setTimeout(() => ghost.remove(), SNAP_BACK_MS);
+      } else {
+        ghost.remove();
+      }
+    }
+    drag.ghost = null;
+    this.container.classList.remove('mm-editor-dragging');
+    this.clearDragSource();
+    this.indicator.style.display = 'none';
+    this.drag = null;
+    this.paintSelection();
+    this.container.focus({ preventScroll: true });
+  }
+
+  private cancelDrag(): void {
+    const drag = this.drag;
+    if (!drag) return;
+    this.stopAutoPan();
+    if (drag.hover !== null) drag.win.clearTimeout(drag.hover);
+    drag.win.removeEventListener('pointermove', this.handlePointerMove, true);
+    drag.win.removeEventListener('pointerup', this.handlePointerUp, true);
+    drag.win.removeEventListener('pointercancel', this.handlePointerCancel, true);
+    drag.win.removeEventListener('keydown', this.handleDragKey, true);
+    if (typeof this.container.releasePointerCapture === 'function') {
+      this.container.releasePointerCapture(drag.pointerId);
+    }
+    drag.ghost?.remove();
+    this.container.classList.remove('mm-editor-dragging');
+    this.clearDragSource();
+    this.indicator.style.display = 'none';
+    this.drag = null;
+  }
+
+  private applyFoldState(ids: string[]): void {
+    this.view.setFoldedIds(ids, { animate: false });
+  }
+
+  private subtreeIds(id: string): string[] {
+    const ids: string[] = [];
+    const visit = (nodeId: string): void => {
+      ids.push(nodeId);
+      const node = this.doc.nodes.get(nodeId);
+      if (!node) return;
+      for (const child of node.children) visit(child);
+    };
+    visit(id);
+    return ids;
+  }
+
+  private moveByKey(key: string): void {
+    const node = this.selectedNode();
+    if (!node?.parent) return;
+    const parent = this.doc.nodes.get(node.parent);
+    if (!parent) return;
+    const index = parent.children.indexOf(node.id);
+    if (key === 'ArrowUp' && index > 0) {
+      this.moveTo(parent.id, index - 1, node.id);
+      return;
+    }
+    if (key === 'ArrowDown' && index < parent.children.length - 1) {
+      this.moveTo(parent.id, index + 1, node.id);
+      return;
+    }
+    if (key === 'ArrowLeft' && index > 0) {
+      const previous = this.doc.nodes.get(parent.children[index - 1]);
+      if (previous) this.moveTo(previous.id, previous.children.length, node.id);
+      return;
+    }
+    if (key === 'ArrowRight' && parent.parent) {
+      const grand = this.doc.nodes.get(parent.parent);
+      if (grand) this.moveTo(grand.id, grand.children.indexOf(parent.id) + 1, node.id);
+    }
+  }
+
+  private moveTo(parentId: string, index: number, nodeId: string): boolean {
+    const node = this.doc.nodes.get(nodeId);
+    if (!node) return false;
+    if (node.parent === parentId) {
+      const parent = this.doc.nodes.get(parentId);
+      if (parent && parent.children.indexOf(node.id) === index) return false;
+    }
+    const result = this.run({ type: 'move', node: node.id, parent: parentId, index });
+    if (!result) return false;
+    if (this.selectedId) this.ensureVisible(this.selectedId);
+    return true;
+  }
+
   private handleKeyDown = (event: KeyboardEvent): void => {
     if (event.defaultPrevented) return;
     if (event.isComposing || event.keyCode === 229) return;
@@ -472,6 +1086,11 @@ export class MarkmapEditor {
       return;
     }
     if (!this.selectedId) return;
+    if (mod && event.shiftKey && event.key.startsWith('Arrow')) {
+      event.preventDefault();
+      this.moveByKey(event.key);
+      return;
+    }
     switch (event.key) {
       case 'Enter':
         event.preventDefault();
@@ -1119,6 +1738,10 @@ export class MarkmapEditor {
       return;
     }
     this.nodeGroup(id)?.classList.add('mm-editor-selected');
+    if (this.drag?.active) {
+      this.selectionBox.style.display = 'none';
+      return;
+    }
     const rect = this.editing
       ? this.editing.field.getBoundingClientRect()
       : this.view.screenRect(id);
@@ -1145,7 +1768,12 @@ export class MarkmapEditor {
     return this.view.element.querySelector(`[data-key="node:${id}"]`);
   }
 
-  private hitAt(event: MouseEvent): { kind: string; nodeId?: string } | undefined {
+  private hitAt(event: { clientX: number; clientY: number }):
+    | {
+        kind: string;
+        nodeId?: string;
+      }
+    | undefined {
     const [x, y] = this.view.layoutPoint(event.clientX, event.clientY);
     return this.view.hitAt(x, y);
   }

@@ -302,6 +302,54 @@ export function headingsToList(text: string, indent: string, unit: string, endin
     .join(ending);
 }
 
+export function listToHeadings(text: string, level: number, ending: string): string {
+  const { document } = parseDocument(text);
+  const root = document.nodes.get(document.root);
+  if (!root) throw new EditError('E_SHAPE', 'The moved text has no root');
+  const tops = (root.block ? [root] : root.children.map((id) => document.nodes.get(id))).filter(
+    (node): node is EditNode => node !== undefined && Boolean(node.block),
+  );
+  if (!tops.length || tops.some((node) => node.kind !== 'listItem')) {
+    throw new EditError('E_SHAPE', 'The moved text is not a list');
+  }
+  const depths = new Map<string, number>();
+  const visit = (node: EditNode, depth: number): void => {
+    depths.set(node.id, depth);
+    for (const id of node.children) {
+      const child = document.nodes.get(id);
+      if (child) visit(child, depth + 1);
+    }
+  };
+  for (const top of tops) visit(top, 0);
+  let offset = 0;
+  return text
+    .split(ending)
+    .map((line) => {
+      const start = offset;
+      offset += line.length + ending.length;
+      if (!line.trim()) return line;
+      const owner = nodeAtOffset(document, start);
+      const depth = owner ? depths.get(owner.id) : undefined;
+      if (!owner || depth === undefined) return line;
+      const target = level + depth;
+      if (target < 1 || target > 6) {
+        throw new EditError('E_LEVEL', 'Heading level cannot exceed six', owner.id);
+      }
+      if (owner.block?.start === start) {
+        const match = /^([ \t]*)([-+*]|\d{1,9}[.)])(?:[ \t]+|$)(\[[ xX]\][ \t]+)?/.exec(line);
+        if (!match) return line;
+        return `${'#'.repeat(target)} ${line.slice(match[0].length)}`;
+      }
+      const list = owner.list;
+      if (!list) return line;
+      const prefix = /^[ \t]*/.exec(line)?.[0] ?? '';
+      const base = list.indent.length + list.marker.length + 1;
+      const relative = Math.max(0, prefix.length - base);
+      return `${' '.repeat(relative)}${line.slice(prefix.length)}`;
+    })
+    .join(ending);
+}
+
 export function reindentList(text: string, delta: number, ending: string): string {
   if (delta === 0) return text;
   if (delta > 0) {
