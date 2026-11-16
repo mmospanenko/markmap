@@ -112,7 +112,7 @@ A dark block for the root, tinted blocks for first-level topics and plain labels
 
 ## Colors
 
-`color` sets the branch colors, and one color paints every branch the same. `colorDepth` makes nodes below a level take their ancestor's color, where the root is level 1.
+`color` sets the branch colors, and one color paints every branch the same. `colorDepth` makes nodes below a level take their ancestor's color, where the root is level 1. The soft theme starts with `colorDepth: 2` and assigns colors by first-level order; the other themes start at `0`.
 
 ```markmap
 ---
