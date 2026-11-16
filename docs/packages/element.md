@@ -44,14 +44,14 @@ The element is 400px high by default. Set `height` in CSS to change it.
 
 These update the map live, and win over the document's frontmatter.
 
-| Attribute      | Description                         |
-| -------------- | ----------------------------------- |
-| `src`          | URL of a Markdown file              |
-| `theme`        | `classic`, `cards` or `minimal`     |
-| `layout`       | `tree`, `two-sided` or `org-chart`  |
-| `color-scheme` | `light`, `dark` or `auto`           |
-| `renderer`     | `svg` (default) or `canvas`         |
-| `toolbar`      | Show the [toolbar](view.md#toolbar) |
+| Attribute      | Description                             |
+| -------------- | --------------------------------------- |
+| `src`          | URL of a Markdown file                  |
+| `theme`        | `classic`, `cards`, `minimal` or `soft` |
+| `layout`       | `tree`, `two-sided` or `org-chart`      |
+| `color-scheme` | `light`, `dark` or `auto`               |
+| `renderer`     | `svg` (default) or `canvas`             |
+| `toolbar`      | Show the [toolbar](view.md#toolbar)     |
 
 ## Properties
 

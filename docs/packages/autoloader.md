@@ -27,7 +27,7 @@ Blocks may also hold the Markdown as plain text, or point to it with `data-src`.
 | Attribute           | Description                                 |
 | ------------------- | ------------------------------------------- |
 | `data-src`          | URL of a Markdown file                      |
-| `data-theme`        | `classic`, `cards` or `minimal`             |
+| `data-theme`        | `classic`, `cards`, `minimal` or `soft`     |
 | `data-layout`       | `tree`, `two-sided` or `org-chart`          |
 | `data-color-scheme` | `light`, `dark` or `auto`                   |
 | `data-renderer`     | `svg` or `canvas`                           |

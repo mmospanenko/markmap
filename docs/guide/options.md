@@ -23,7 +23,7 @@ Values that are invalid or unknown are ignored and reported as warnings. The [ed
 
 Type: `string`, default: `classic`
 
-One of `classic`, `cards` and `minimal`. See [Themes and layouts](themes-and-layouts.md).
+One of `classic`, `cards`, `minimal` and `soft`. See [Themes and layouts](themes-and-layouts.md).
 
 ### layout
 
