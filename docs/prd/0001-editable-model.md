@@ -20,6 +20,7 @@ The projection is a validated snapshot of the tree over the original text. Comma
 - [REQ-1-10] The splice engine shall apply non-overlapping edits and map source offsets through them.
 - [REQ-1-11] Formatting helpers shall insert, indent, dedent and place blocks at line boundaries.
 - [REQ-1-12] When a Markdown block is pasted under a node, the command shall insert the whole block after the node's block, renumber heading levels or reindent list items to the child depth, keep notes and descendants, return the label selection of the pasted root, and reject a level beyond six without changing the input. When the target is a list item, a heading subtree shall become a list subtree with the same nodes, notes, continuation lines, and markers.
+- [REQ-1-13] When a node is moved to a parent at an index, the command shall keep the whole block with its notes, markers and continuation lines, change heading levels and list indents for the destination, return the moved label selection, accept the root as a parent, and reject the root, an opaque node, a cycle, an impossible heading level or an out-of-range index without changing the input. The index shall be the final position after the node is removed, and a move to its current position shall change no bytes.
 
 ## Acceptance tests
 
@@ -39,11 +40,12 @@ Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the c
 | REQ-1-10    | TC-1-10-1 ... TC-1-10-5  |
 | REQ-1-11    | TC-1-11-1 ... TC-1-11-7  |
 | REQ-1-12    | TC-1-12-1 ... TC-1-12-14 |
+| REQ-1-13    | TC-1-13-1 ... TC-1-13-18 |
 
 ## Out of scope
 
 - Clipboard detection and transfer format; the app owns them.
-- Drag and drop, multi-select, saving fold state to Markdown.
+- Multi-select, saving fold state to Markdown.
 - Publishing the fork to npm.
 
 The DOM layer is specified in [PRD-2](0002-dom-editor.md). Notes editing is specified in [PRD-3](0003-notes.md).
