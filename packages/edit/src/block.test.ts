@@ -1,4 +1,11 @@
-import { buildDocument, labelText, type Document, type EditNode } from '@markmap/model';
+import {
+  buildDocument,
+  labelText,
+  noteText,
+  notesText,
+  type Document,
+  type EditNode,
+} from '@markmap/model';
 import { describe, expect, it } from 'vitest';
 import { applyCommand, EditError, type EditResult } from '.';
 
@@ -175,5 +182,147 @@ describe('insert block', () => {
       '# A\n- a\n  - B\n\n    ```markmap-note\n    note b\n    ```\n## B\n\n```markmap-note\nnote b\n```\n',
     );
     expect(find(result.document, 'a').children).toHaveLength(1);
+  });
+
+  it('[TC-1-12-16] keeps a paragraph intro note on a pasted heading root', () => {
+    const result = paste('# Target\n', 'Target', 'Intro.\n\n## A\n\n- x\n');
+    expect(result.document.source).toBe('# Target\n## A\n\nIntro.\n\n- x\n');
+    const pasted = find(result.document, 'A');
+    expect(notesText(result.document, pasted)).toBe('Intro.');
+    expect(find(result.document, 'x').parent).toBe(pasted.id);
+    expect(result.selection).toBe(pasted.label?.start);
+  });
+
+  it('[TC-1-12-17] keeps a fenced intro note on a pasted heading root', () => {
+    const result = paste('# Target\n', 'Target', '```markmap-note\nIntro.\n```\n\n## A\n\n- x\n');
+    expect(result.document.source).toBe('# Target\n## A\n\n```markmap-note\nIntro.\n```\n\n- x\n');
+    const pasted = find(result.document, 'A');
+    expect(notesText(result.document, pasted)).toBe('Intro.');
+    expect(pasted.notes.map((note) => note.fence)).toEqual([true]);
+    expect(find(result.document, 'x').parent).toBe(pasted.id);
+    expect(result.selection).toBe(pasted.label?.start);
+  });
+
+  it('[TC-1-12-18] attaches an intro note to a pasted list root', () => {
+    const paragraph = paste('- target\n', 'target', 'Intro.\n\n## A\n\n- x\n');
+    expect(paragraph.document.source).toBe('- target\n  - A\n\n    Intro.\n\n    - x\n');
+    const pasted = find(paragraph.document, 'A');
+    expect(notesText(paragraph.document, pasted)).toBe('Intro.');
+    expect(find(paragraph.document, 'x').parent).toBe(pasted.id);
+    expect(paragraph.selection).toBe(pasted.label?.start);
+
+    const fenceText = '```markmap-note\nIntro.\n```\n\n## A\n\n- x\n';
+    const fenced = paste('- target\n', 'target', fenceText);
+    expect(fenced.document.source).toBe(
+      '- target\n  - A\n\n    ```markmap-note\n    Intro.\n    ```\n\n    - x\n',
+    );
+    const fencedRoot = find(fenced.document, 'A');
+    expect(notesText(fenced.document, fencedRoot)).toBe('Intro.');
+    expect(fencedRoot.notes.map((note) => note.fence)).toEqual([true]);
+    expect(find(fenced.document, 'x').parent).toBe(fencedRoot.id);
+  });
+
+  it('[TC-1-12-19] keeps multiple leading notes on a childless pasted root', () => {
+    const result = paste(
+      '# Target\n',
+      'Target',
+      'First.\n\n```markmap-note\nSecond.\n```\n\n## A\n',
+    );
+    expect(result.document.source).toBe(
+      '# Target\n## A\n\nFirst.\n\n```markmap-note\nSecond.\n```\n',
+    );
+    const pasted = find(result.document, 'A');
+    expect(pasted.notes).toHaveLength(2);
+    expect(notesText(result.document, pasted)).toBe('First.\n\nSecond.');
+    expect(result.selection).toBe(pasted.label?.start);
+  });
+
+  it('[TC-1-12-20] rejects an unsupported link reference prefix', () => {
+    const input = '# Target\n';
+    const doc = buildDocument(input);
+    const error = editError(() =>
+      applyCommand(doc, {
+        type: 'insertBlock',
+        node: doc.root,
+        text: '[ref]: https://example.com\n\n## A\n\n[Link][ref]\n',
+      }),
+    );
+    expect(error.message).toContain('cannot become a note');
+    expect(doc.source).toBe(input);
+    expect(doc.nodes.size).toBe(1);
+  });
+
+  it('[TC-1-12-21] rejects an unsupported raw HTML prefix', () => {
+    const input = '# Target\n';
+    const doc = buildDocument(input);
+    const error = editError(() =>
+      applyCommand(doc, {
+        type: 'insertBlock',
+        node: doc.root,
+        text: '<!-- hidden -->\n\n## A\n\n- x\n',
+      }),
+    );
+    expect(error.message).toContain('cannot become a note');
+    expect(doc.source).toBe(input);
+  });
+
+  it('[TC-1-12-22] rejects unsupported content mixed with a supported note prefix', () => {
+    const input = '# Target\n';
+    const doc = buildDocument(input);
+    const error = editError(() =>
+      applyCommand(doc, {
+        type: 'insertBlock',
+        node: doc.root,
+        text: 'Intro.\n\n<!-- hidden -->\n\n## A\n\n- x\n',
+      }),
+    );
+    expect(error.message).toContain('cannot become a note');
+    expect(doc.source).toBe(input);
+  });
+
+  it('[TC-1-12-23] keeps the target notes when pasting a root with an intro note', () => {
+    const result = paste('# Target\n\nTarget note.\n', 'Target', 'Intro.\n\n## A\n\n- x\n');
+    expect(result.document.source).toBe('# Target\n\nTarget note.\n## A\n\nIntro.\n\n- x\n');
+    const target = find(result.document, 'Target');
+    expect(target.notes).toHaveLength(1);
+    expect(notesText(result.document, target)).toBe('Target note.');
+    const pasted = find(result.document, 'A');
+    expect(notesText(result.document, pasted)).toBe('Intro.');
+    expect(result.selection).toBe(pasted.label?.start);
+  });
+
+  it('[TC-1-12-24] keeps mixed leading notes in order on heading and list targets', () => {
+    const fragment = 'First.\n\n```markmap-note\nSecond.\n```\n\nThird.\n\n## A\n\n- x\n';
+
+    const heading = paste('# Target\n', 'Target', fragment);
+    expect(heading.document.source).toBe(
+      '# Target\n## A\n\nFirst.\n\n```markmap-note\nSecond.\n```\n\nThird.\n\n- x\n',
+    );
+    const headingRoot = find(heading.document, 'A');
+    expect(headingRoot.notes.map((note) => note.fence)).toEqual([false, true, false]);
+    expect(notesText(heading.document, headingRoot)).toBe('First.\n\nSecond.\n\nThird.');
+    expect(find(heading.document, 'x').parent).toBe(headingRoot.id);
+
+    const list = paste('- target\n', 'target', fragment);
+    expect(list.document.source).toBe(
+      '- target\n  - A\n\n    First.\n\n    ```markmap-note\n    Second.\n    ```\n\n    Third.\n\n    - x\n',
+    );
+    const listRoot = find(list.document, 'A');
+    expect(listRoot.notes.map((note) => note.fence)).toEqual([false, true, false]);
+    expect(notesText(list.document, listRoot)).toBe('First.\n\nSecond.\n\nThird.');
+    expect(find(list.document, 'x').parent).toBe(listRoot.id);
+  });
+
+  it('[TC-1-12-25] distinguishes per-note partitions that join to the same text', () => {
+    const fragment = '```markmap-note\nA\n\nB\n```\n\nC\n\n## Root\n\n- x\n';
+    const result = paste('# Target\n', 'Target', fragment);
+    expect(result.document.source).toBe(
+      '# Target\n## Root\n\n```markmap-note\nA\n\nB\n```\n\nC\n\n- x\n',
+    );
+    const root = find(result.document, 'Root');
+    const notes = root.notes.map((note) => noteText(result.document, root, note));
+    expect(notes).toEqual(['A\n\nB', 'C']);
+    expect(notes.join('\n\n')).toBe('A\n\nB\n\nC');
+    expect(['A', 'B\n\nC'].join('\n\n')).toBe(notes.join('\n\n'));
   });
 });

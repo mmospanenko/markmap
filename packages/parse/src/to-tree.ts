@@ -31,7 +31,8 @@ export interface ToTreeOptions {
  * - Headings nest by depth; list items nest under the heading or item that contains them.
  * - Other blocks become notes of the node that owns them. Blocks before the first
  *   heading attach to the root.
- * - A lone top-level H1 becomes the root, unless `title` is given.
+ * - A lone top-level heading at any level becomes the root. A `title` supplies
+ *   the root label only when no heading promotion happens.
  * - Raw HTML, frontmatter and link definitions are dropped. A `<!-- markmap: … -->`
  *   comment in a label sets node options: `fold` folds the node, `foldAll` folds it
  *   and everything below.
@@ -54,7 +55,7 @@ export function toTree(mdast: Root, options: ToTreeOptions = {}): MarkmapNode {
     }
   }
 
-  if (!options.title) root = promoteSingleH1(root);
+  root = promoteSingleHeading(root);
   return assignIds(root);
 }
 
@@ -196,10 +197,12 @@ function isMdastBlock(block: RootContent): block is MdastBlock {
   }
 }
 
-function promoteSingleH1(root: MarkmapNode): MarkmapNode {
+function promoteSingleHeading(root: MarkmapNode): MarkmapNode {
   const [only] = root.children;
-  if (root.children.length !== 1 || only.type !== 'heading' || only.data.depth !== 1) return root;
-  // Blocks before the H1 come first in source order.
+  if (root.children.length !== 1 || only.type !== 'heading') return root;
+  const depth = typeof only.data.depth === 'number' ? only.data.depth : 0;
+  if (depth < 1 || depth > 6) return root;
+  // Blocks before the heading come first in source order.
   only.notes = [...root.notes.map((a) => ({ ...a, after: 0 })), ...only.notes];
   return only;
 }

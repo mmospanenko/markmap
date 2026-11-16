@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { MarkmapNode, Rect, Side } from '@markmap/core';
-import { labelText, type Document } from '@markmap/model';
+import { labelText, notesText, type Document } from '@markmap/model';
 import type { Markmap } from '@markmap/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MarkmapEditor, createEditView } from '.';
@@ -19,6 +19,8 @@ class FakeView implements EditView {
   rects = new Map<string, Rect | undefined>();
   directions = new Map<string, Side>();
   defaultDirection: Side | undefined;
+  known = new Set<string>();
+  hidden = new Set<string>();
   private listeners = new Map<string, Set<() => void>>();
 
   get foldedIds(): ReadonlySet<string> {
@@ -37,6 +39,7 @@ class FakeView implements EditView {
       for (const child of node.children) visit(child);
     };
     visit(root);
+    this.known = ids;
     this.folded = new Set([...this.folded].filter((id) => ids.has(id)));
     this.emit('render');
   }
@@ -62,6 +65,7 @@ class FakeView implements EditView {
   }
 
   screenRect(id: string): Rect | undefined {
+    if (!this.known.has(id) || this.hidden.has(id)) return undefined;
     if (this.rects.has(id)) return this.rects.get(id);
     return { x: 10, y: 20, width: 100, height: 30 };
   }
@@ -97,23 +101,36 @@ function setup(source = '- a\n- b\n', options: Partial<MarkmapEditorOptions> = {
   document.body.append(container);
   const view = new FakeView();
   const changes: Array<{ source: string; selection: number; document: Document }> = [];
+  const drafts: Array<{ source: string; selection: number; document: Document }> = [];
   const errors: Error[] = [];
+  const { onChange, onDraftChange, onError, ...rest } = options;
   const editor = new MarkmapEditor({
     source,
     view,
     container,
-    onChange: (change) => changes.push(change),
-    onError: (error) => errors.push(error),
-    ...options,
+    onChange: (change) => {
+      changes.push(change);
+      onChange?.(change);
+    },
+    onDraftChange: (change) => {
+      drafts.push(change);
+      onDraftChange?.(change);
+    },
+    onError: (error) => {
+      errors.push(error);
+      onError?.(error);
+    },
+    ...rest,
   });
   liveEditors.push(editor);
+  view.known = new Set(editor.document.order);
   for (const id of editor.document.order) {
     const node = document.createElement('div');
     node.dataset.key = `node:${id}`;
     view.element.append(node);
   }
   view.emit('render');
-  return { container, view, editor, changes, errors };
+  return { container, view, editor, changes, drafts, errors };
 }
 
 function field(container: HTMLElement): HTMLTextAreaElement {
@@ -129,6 +146,11 @@ function key(target: EventTarget, value: string, init: KeyboardEventInit = {}) {
 function clickNode(container: HTMLElement, view: FakeView, id: string) {
   view.hit = { kind: 'node', nodeId: id };
   container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+}
+
+function selectedId(editor: MarkmapEditor): string {
+  if (!editor.selected) throw new Error('No selected node');
+  return editor.selected;
 }
 
 function nodeId(editor: MarkmapEditor, text: string): string {
@@ -330,6 +352,56 @@ describe('MarkmapEditor', () => {
     key(field(container), 'Enter');
     expect(editor.source).toBe('- a\n  - child\n- b\n');
     expect(editor.isEditing).toBe(false);
+  });
+
+  it('[TC-2-2-6] makes a Tab child of an H1 root H2', () => {
+    const { container, editor } = setup('# A\n');
+    key(container, 'Tab');
+    type(container, 'B');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n## B\n');
+    const created = editor.document.nodes.get(selectedId(editor));
+    expect(created?.kind).toBe('heading');
+    expect(created?.level).toBe(2);
+    expect(created?.parent).toBe(editor.document.root);
+  });
+
+  it('[TC-2-2-7] makes a Tab child of an H2 heading a list item', () => {
+    const { container, view, editor } = setup('# A\n\n## B\n');
+    clickNode(container, view, nodeId(editor, 'B'));
+    key(container, 'Tab');
+    type(container, 'c');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n\n## B\n- c\n');
+    const created = editor.document.nodes.get(selectedId(editor));
+    expect(created?.kind).toBe('listItem');
+    expect(created?.parent).toBe(nodeId(editor, 'B'));
+  });
+
+  it('[TC-2-2-8] makes an Enter sibling of an H3 heading a list item under the parent', () => {
+    const { container, view, editor } = setup('# A\n\n## B\n\n### C\n');
+    clickNode(container, view, nodeId(editor, 'C'));
+    key(container, 'Enter');
+    type(container, 'D');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n\n## B\n\n- D\n### C\n');
+    const created = editor.document.nodes.get(selectedId(editor));
+    expect(created?.kind).toBe('listItem');
+    expect(created?.parent).toBe(nodeId(editor, 'B'));
+  });
+
+  it('[TC-2-2-9] makes a Tab child of an H6 heading a list item', () => {
+    const { container, view, editor } = setup(
+      '# A\n\n## B\n\n### C\n\n#### D\n\n##### E\n\n###### F\n',
+    );
+    clickNode(container, view, nodeId(editor, 'F'));
+    key(container, 'Tab');
+    type(container, 'G');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n\n## B\n\n### C\n\n#### D\n\n##### E\n\n###### F\n- G\n');
+    const created = editor.document.nodes.get(selectedId(editor));
+    expect(created?.kind).toBe('listItem');
+    expect(created?.parent).toBe(nodeId(editor, 'F'));
   });
 
   it('[TC-2-2-5] starts a new node with an empty label', () => {
@@ -567,7 +639,7 @@ describe('MarkmapEditor', () => {
 
     const title = setup('---\ntitle: Root title\n---\n\n## Branch\n\n- Leaf\n');
     clickNode(title.container, title.view, title.editor.document.root);
-    expect(title.editor.selectedBlock()).toBe('# Root title\n\n## Branch\n\n- Leaf\n');
+    expect(title.editor.selectedBlock()).toBe('## Branch\n\n- Leaf\n');
 
     const emptyTitle = setup('---\ntitle: Root title\n---\n');
     clickNode(emptyTitle.container, emptyTitle.view, emptyTitle.editor.document.root);
@@ -576,6 +648,84 @@ describe('MarkmapEditor', () => {
     const empty = setup('');
     clickNode(empty.container, empty.view, empty.editor.document.root);
     expect(empty.editor.selectedBlock()).toBeNull();
+  });
+
+  it('[TC-2-19-5] copies intro notes with a promoted H1 or H2 root', () => {
+    const h1 = setup('Intro.\n\n# A\n\n- x\n');
+    clickNode(h1.container, h1.view, h1.editor.document.root);
+    expect(h1.editor.selectedBlock()).toBe('Intro.\n\n# A\n\n- x\n');
+
+    const h2 = setup('Intro.\n\n## A\n\n- x\n');
+    clickNode(h2.container, h2.view, h2.editor.document.root);
+    expect(h2.editor.selectedBlock()).toBe('Intro.\n\n## A\n\n- x\n');
+  });
+
+  it('[TC-2-19-6] copies a fenced intro note with a promoted H1 or H2 root', () => {
+    const h1 = setup('```markmap-note\nIntro.\n```\n\n# A\n\n- x\n');
+    clickNode(h1.container, h1.view, h1.editor.document.root);
+    expect(h1.editor.selectedBlock()).toBe('```markmap-note\nIntro.\n```\n\n# A\n\n- x\n');
+
+    const h2 = setup('```markmap-note\nIntro.\n```\n\n## A\n\n- x\n');
+    clickNode(h2.container, h2.view, h2.editor.document.root);
+    expect(h2.editor.selectedBlock()).toBe('```markmap-note\nIntro.\n```\n\n## A\n\n- x\n');
+  });
+
+  it('[TC-2-19-7] excludes frontmatter from a promoted root block', () => {
+    const { container, view, editor } = setup('---\nfoo: 1\n---\n\nIntro.\n\n# A\n\n- x\n');
+    clickNode(container, view, editor.document.root);
+    expect(editor.selectedBlock()).toBe('Intro.\n\n# A\n\n- x\n');
+  });
+
+  it('[TC-2-19-8] pastes a copied promoted root with a paragraph intro note', () => {
+    const source = setup('Intro.\n\n## A\n\n- x\n');
+    const copied = source.editor.selectedBlock();
+    if (!copied) throw new Error('No copied block');
+    expect(copied).toBe('Intro.\n\n## A\n\n- x\n');
+
+    const target = setup('# Target\n');
+    expect(target.editor.insertBlock(copied)).toBe(true);
+    expect(target.editor.source).toBe('# Target\n## A\n\nIntro.\n\n- x\n');
+    const pastedId = nodeId(target.editor, 'A');
+    const pasted = target.editor.document.nodes.get(pastedId);
+    if (!pasted) throw new Error('No pasted node');
+    expect(notesText(target.editor.document, pasted)).toBe('Intro.');
+    expect(pasted.notes).toHaveLength(1);
+    expect(target.editor.document.nodes.get(nodeId(target.editor, 'x'))?.parent).toBe(pastedId);
+    expect(target.editor.selected).toBe(pastedId);
+  });
+
+  it('[TC-2-19-9] pastes a copied promoted root with a fenced intro note', () => {
+    const source = setup('```markmap-note\nIntro.\n```\n\n## A\n\n- x\n');
+    const copied = source.editor.selectedBlock();
+    if (!copied) throw new Error('No copied block');
+    expect(copied).toBe('```markmap-note\nIntro.\n```\n\n## A\n\n- x\n');
+
+    const target = setup('# Target\n');
+    expect(target.editor.insertBlock(copied)).toBe(true);
+    expect(target.editor.source).toBe('# Target\n## A\n\n```markmap-note\nIntro.\n```\n\n- x\n');
+    const pastedId = nodeId(target.editor, 'A');
+    const pasted = target.editor.document.nodes.get(pastedId);
+    if (!pasted) throw new Error('No pasted node');
+    expect(notesText(target.editor.document, pasted)).toBe('Intro.');
+    expect(pasted.notes.map((note) => note.fence)).toEqual([true]);
+    expect(target.editor.document.nodes.get(nodeId(target.editor, 'x'))?.parent).toBe(pastedId);
+    expect(target.editor.selected).toBe(pastedId);
+  });
+
+  it('[TC-2-19-10] rejects an unsupported prefix without changing history or redo', () => {
+    const { container, view, editor, errors, changes } = setup('# Target\n');
+    expect(editor.setLabel(editor.document.root, 'B')).toBe(true);
+    expect(editor.undo()).toBe(true);
+    expect(editor.canRedo).toBe(true);
+    clickNode(container, view, editor.document.root);
+    const before = changes.length;
+
+    expect(editor.insertBlock('[ref]: https://example.com\n\n## A\n\n[Link][ref]\n')).toBe(false);
+    expect(errors.at(-1)?.message).toContain('cannot become a note');
+    expect(editor.source).toBe('# Target\n');
+    expect(editor.canUndo).toBe(false);
+    expect(editor.canRedo).toBe(true);
+    expect(changes).toHaveLength(before);
   });
 
   it('[TC-2-19-3] deletes the selected subtree and rejects the root', () => {
@@ -590,11 +740,11 @@ describe('MarkmapEditor', () => {
     expect(errors).toHaveLength(1);
   });
 
-  it('[TC-2-17-4] adds a child when Enter is pressed on a non-empty root', () => {
-    const { container, editor } = setup();
+  it('[TC-2-17-4] adds a child when Enter is pressed on a source-heading root', () => {
+    const { container, editor } = setup('# A\n');
     key(container, 'Enter');
     expect(editor.isEditing).toBe(true);
-    expect(editor.source).toContain('New topic');
+    expect(editor.source).toContain('## New topic');
   });
 
   it('[TC-2-6-1] undoes and redoes an edit', () => {
@@ -754,22 +904,23 @@ describe('MarkmapEditor', () => {
   });
 
   it('[TC-2-18-1] snapshots the current label without leaving editing', () => {
-    const { container, view, editor, changes } = setup();
+    const { container, view, editor, changes, drafts } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'a revised label');
 
-    expect(editor.commitForSnapshot()).toBe('- a revised label\n- b\n');
-    expect(changes.at(-1)?.source).toBe('- a revised label\n- b\n');
+    expect(editor.snapshot()).toBe('- a revised label\n- b\n');
+    expect(drafts.at(-1)?.source).toBe('- a revised label\n- b\n');
+    expect(changes).toHaveLength(0);
     expect(editor.isEditing).toBe(true);
     expect(container.classList.contains('mm-editor-mode-edit')).toBe(true);
     expect(field(container).value).toBe('a revised label');
     expect(document.activeElement).toBe(field(container));
 
     type(container, 'a revised label continued');
-    expect(editor.source).toBe('- a revised label\n- b\n');
-    expect(editor.commitForSnapshot()).toBe('- a revised label continued\n- b\n');
-    expect(changes.at(-1)?.source).toBe('- a revised label continued\n- b\n');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.snapshot()).toBe('- a revised label continued\n- b\n');
+    expect(drafts.at(-1)?.source).toBe('- a revised label continued\n- b\n');
     expect(editor.isEditing).toBe(true);
   });
 
@@ -778,7 +929,7 @@ describe('MarkmapEditor', () => {
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, 'Tab');
 
-    expect(editor.commitForSnapshot()).toBe('- a\n  - \u200B\n- b\n');
+    expect(editor.snapshot()).toBe('- a\n  - \u200B\n- b\n');
     expect(editor.isEditing).toBe(true);
     expect(field(container).value).toBe('');
   });
@@ -948,7 +1099,7 @@ describe('MarkmapEditor edges', () => {
   });
 
   it('[TC-2-13-11] guards editing without a label, a rect or a new node', () => {
-    const { container, view, editor } = setup('- a\n');
+    const { container, view, editor } = setup('---\ntitle: T\n---\n\n- a\n\n## B\n');
     editor.startEditing(editor.document.root);
     expect(editor.isEditing).toBe(false);
     const a = nodeId(editor, 'a');
@@ -1359,12 +1510,12 @@ describe('MarkmapEditor notes', () => {
     const { container, view, editor, changes } = setup('- a\n- b\n');
     const notes = openNotes(container, view, editor, 'a');
     notes.value = 'note';
-    const source = editor.commitForSnapshot();
+    const source = editor.snapshot();
     expect(source).toBe('- a\n  ```markmap-note\n  note\n  ```\n- b\n');
     expect(editor.isEditingNotes).toBe(true);
     expect(document.activeElement).toBe(notes);
     expect(changes).toHaveLength(1);
-    expect(editor.commitForSnapshot()).toBe(source);
+    expect(editor.snapshot()).toBe(source);
     expect(changes).toHaveLength(1);
     expect(editor.undo()).toBe(true);
     expect(editor.source).toBe('- a\n- b\n');
@@ -1514,7 +1665,7 @@ describe('MarkmapEditor notes', () => {
 
   it('[TC-3-10-4] returns the source for a snapshot outside editing', () => {
     const { editor } = setup('- a\n');
-    expect(editor.commitForSnapshot()).toBe('- a\n');
+    expect(editor.snapshot()).toBe('- a\n');
   });
 
   it('[TC-3-10-5] drops a whitespace-only note without a history entry', () => {
@@ -1534,9 +1685,11 @@ describe('MarkmapEditor notes', () => {
     expect(editor.deleteSelected()).toBe(true);
     expect(editor.source).toBe('- b\n');
 
-    const title = setup('---\ntitle: T\n---\n\n```markmap-note\nroot note\n```\n\n## B\n');
+    const title = setup('---\ntitle: T\n---\n\n```markmap-note\nroot note\n```\n\n## B\n\n## C\n');
     clickNode(title.container, title.view, title.editor.document.root);
-    expect(title.editor.selectedBlock()).toBe('# T\n\n```markmap-note\nroot note\n```\n\n## B\n');
+    expect(title.editor.selectedBlock()).toBe(
+      '# T\n\n```markmap-note\nroot note\n```\n\n## B\n\n## C\n',
+    );
   });
 });
 
@@ -1667,12 +1820,538 @@ describe('Empty document', () => {
     expect(editor.source).toBe('');
   });
 
-  it('[TC-2-14-7] reports a notice for a root label from frontmatter', () => {
+  it('[TC-2-14-7] creates a first heading from a title root without headings', () => {
     const { container, editor, errors } = setup('---\ntitle: T\n---\n');
     key(container, ' ');
+    expect(editor.isEditing).toBe(true);
+    type(container, 'First');
+    key(field(container), 'Enter');
+    expect(errors).toHaveLength(0);
+    expect(editor.source).toBe('---\ntitle: T\n---\n# First\n');
+    expect(editor.document.nodes.get(editor.document.root)?.label).toBeDefined();
+    expect(labelText(editor.document, editor.document.nodes.get(editor.document.root)!)).toBe(
+      'First',
+    );
+  });
+});
+
+describe('Label snapshots', () => {
+  it('[TC-2-22-1] snapshots twice and commits one undo entry', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'one');
+    expect(editor.snapshot()).toBe('- one\n- b\n');
+    type(container, 'two');
+    expect(editor.snapshot()).toBe('- two\n- b\n');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.isEditing).toBe(true);
+
+    editor.commit();
+    expect(editor.source).toBe('- two\n- b\n');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('- two\n- b\n');
+  });
+
+  it('[TC-2-22-2] keeps redo after an unchanged snapshot session', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'Delete');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canRedo).toBe(true);
+
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    expect(editor.snapshot()).toBe('- a\n- b\n');
+    key(field(container), 'Escape');
+    expect(editor.canRedo).toBe(true);
+    expect(editor.canUndo).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('- b\n');
+  });
+
+  it('[TC-2-22-3] restores the baseline on Escape after zero, one or many snapshots', () => {
+    for (const copies of [0, 1, 3]) {
+      const { container, view, editor, changes, drafts } = setup();
+      clickNode(container, view, nodeId(editor, 'a'));
+      key(container, ' ');
+      type(container, 'draft');
+      for (let index = 0; index < copies; index += 1) {
+        type(container, `draft-${index}`);
+        expect(editor.snapshot()).toContain(`draft-${index}`);
+      }
+      key(field(container), 'Escape');
+      expect(editor.source).toBe('- a\n- b\n');
+      expect(editor.isEditing).toBe(false);
+      expect(editor.canUndo).toBe(false);
+      expect(drafts.at(-1)?.source).toBe('- a\n- b\n');
+      expect(changes).toHaveLength(0);
+    }
+  });
+
+  it('[TC-2-22-4] keeps the field, focus and caret during snapshots', () => {
+    const { container, view, editor } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    const input = field(container);
+    input.setSelectionRange(2, 4);
+    expect(editor.snapshot()).toBe('- draft\n- b\n');
+    expect(editor.snapshot()).toBe('- draft\n- b\n');
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(2);
+    expect(input.selectionEnd).toBe(4);
+    expect(editor.isEditing).toBe(true);
+    expect(container.classList.contains('mm-editor-mode-edit')).toBe(true);
+  });
+
+  it('[TC-2-22-5] never publishes a failed draft', () => {
+    const { container, editor, changes, drafts } = setup('# A\n');
+    key(container, ' ');
+    type(container, 'AB');
+    expect(editor.snapshot()).toBe('# AB\n');
+    type(container, 'A\nB');
+    expect(editor.snapshot()).toBe('# AB\n');
+    expect(drafts.at(-1)?.source).toBe('# AB\n');
+    expect(changes).toHaveLength(0);
+    key(field(container), 'Escape');
+    expect(editor.source).toBe('# A\n');
+    expect(drafts.at(-1)?.source).toBe('# A\n');
+    expect(changes).toHaveLength(0);
+  });
+
+  it('[TC-2-22-6] resets the field with Cmd+Z and republishes the baseline', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    expect(editor.snapshot()).toBe('- draft\n- b\n');
+    key(field(container), 'z', { metaKey: true });
+    expect(field(container).value).toBe('a');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(drafts.at(-1)?.source).toBe('- a\n- b\n');
+    expect(changes).toHaveLength(0);
+  });
+});
+
+describe('No-op label sessions', () => {
+  it('[TC-2-22-7] closes trailing-space and leading-space no-ops without history', () => {
+    for (const text of ['A ', ' A']) {
+      const { container, editor, changes, drafts } = setup('# A\n');
+      key(container, ' ');
+      type(container, text);
+      key(field(container), 'Enter');
+      expect(editor.source).toBe('# A\n');
+      expect(editor.isEditing).toBe(false);
+      expect(editor.canUndo).toBe(false);
+      expect(changes).toHaveLength(0);
+      expect(drafts).toHaveLength(0);
+    }
+  });
+
+  it('[TC-2-22-8] keeps redo after a normalized no-op session', () => {
+    const { container, view, editor } = setup('# A\n');
+    expect(editor.setLabel(editor.document.root, 'B')).toBe(true);
+    expect(editor.source).toBe('# B\n');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('# A\n');
+    expect(editor.canRedo).toBe(true);
+
+    clickNode(container, view, editor.document.root);
+    key(container, ' ');
+    type(container, 'A ');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n');
+    expect(editor.canUndo).toBe(false);
+    expect(editor.canRedo).toBe(true);
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('# B\n');
+  });
+
+  it('[TC-2-22-9] keeps redo after a no-op programmatic label', () => {
+    const { editor } = setup('# A\n');
+    expect(editor.setLabel(editor.document.root, 'B')).toBe(true);
+    expect(editor.undo()).toBe(true);
+    expect(editor.canRedo).toBe(true);
+    expect(editor.setLabel(editor.document.root, 'A ')).toBe(true);
+    expect(editor.source).toBe('# A\n');
+    expect(editor.canUndo).toBe(false);
+    expect(editor.canRedo).toBe(true);
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('# B\n');
+  });
+});
+
+describe('Draft notifications', () => {
+  it('[TC-2-24-1] emits a draft before the first snapshot', () => {
+    const { container, view, editor, drafts, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    expect(drafts.map((change) => change.source)).toEqual(['- draft\n- b\n']);
+    expect(changes).toHaveLength(0);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-24-2] returns the draft without a second event', () => {
+    const { container, view, editor, drafts, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    expect(editor.snapshot()).toBe('- draft\n- b\n');
+    expect(editor.snapshot()).toBe('- draft\n- b\n');
+    expect(drafts).toHaveLength(1);
+    expect(changes).toHaveLength(0);
+  });
+
+  it('[TC-2-24-3] emits a newer draft after a snapshot', () => {
+    const { container, view, editor, drafts } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'one');
+    expect(editor.snapshot()).toBe('- one\n- b\n');
+    type(container, 'two');
+    expect(drafts.map((change) => change.source)).toEqual(['- one\n- b\n', '- two\n- b\n']);
+    expect(editor.snapshot()).toBe('- two\n- b\n');
+  });
+
+  it('[TC-2-24-5] never publishes stale text for an invalid draft', () => {
+    const { container, editor, drafts, changes } = setup('# A\n');
+    key(container, ' ');
+    type(container, 'AB');
+    expect(drafts.map((change) => change.source)).toEqual(['# AB\n']);
+    type(container, 'A\nB');
+    expect(editor.snapshot()).toBe('# AB\n');
+    expect(drafts).toHaveLength(1);
+    expect(changes).toHaveLength(0);
+    key(field(container), 'Escape');
+    expect(drafts.at(-1)?.source).toBe('# A\n');
+    expect(editor.source).toBe('# A\n');
+  });
+
+  it('[TC-2-24-6] emits the baseline when editing is cancelled', () => {
+    const { container, view, editor, drafts, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    expect(drafts.at(-1)?.source).toBe('- draft\n- b\n');
+    key(field(container), 'Escape');
+    expect(drafts.at(-1)?.source).toBe('- a\n- b\n');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+    expect(changes).toHaveLength(0);
+  });
+
+  it('[TC-2-24-7] keeps one history entry after draft notifications', () => {
+    const { container, view, editor, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'one');
+    expect(editor.snapshot()).toBe('- one\n- b\n');
+    type(container, 'two');
+    editor.commit();
+    expect(editor.source).toBe('- two\n- b\n');
+    expect(changes.at(-1)?.source).toBe('- two\n- b\n');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-24-8] keeps notes snapshots on the committed channel', () => {
+    const { container, view, editor, drafts, changes } = setup('- a\n- b\n');
+    const notes = openNotes(container, view, editor, 'a');
+    notes.value = 'note';
+    const source = editor.snapshot();
+    expect(source).toBe('- a\n  ```markmap-note\n  note\n  ```\n- b\n');
+    expect(editor.isEditingNotes).toBe(true);
+    expect(editor.canUndo).toBe(true);
+    expect(changes).toHaveLength(1);
+    expect(drafts).toHaveLength(0);
+    expect(editor.snapshot()).toBe(source);
+    expect(editor.canUndo).toBe(true);
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-24-9] emits no draft for an unchanged cancelled session', () => {
+    const { container, view, editor, drafts, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    key(field(container), 'Escape');
+    expect(drafts).toHaveLength(0);
+    expect(changes).toHaveLength(0);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-24-10] does not repeat a committed draft', () => {
+    const { container, view, editor, drafts, changes } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    expect(drafts.map((change) => change.source)).toEqual(['- draft\n- b\n']);
+    editor.commit();
+    expect(drafts).toHaveLength(1);
+    expect(changes.at(-1)?.source).toBe('- draft\n- b\n');
+    expect(editor.source).toBe('- draft\n- b\n');
+  });
+
+  it('[TC-2-24-11] ignores repeated identical input', () => {
+    const { container, view, editor, drafts } = setup();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    type(container, 'draft');
+    expect(drafts.map((change) => change.source)).toEqual(['- draft\n- b\n']);
+  });
+});
+
+describe('Session completion', () => {
+  it('[TC-2-25-1] publishes the baseline when the edited node loses its rect', () => {
+    const { container, view, editor, drafts } = setup('- a\n- b\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    expect(drafts.map((change) => change.source)).toEqual(['- draft\n- b\n']);
+    const preview = view.tree?.children.find((child) => treeLabel(child) === 'draft');
+    if (!preview) throw new Error('No draft node');
+    const saved = drafts[0]?.source;
+
+    view.hidden.add(preview.id);
+    view.emit('render');
+
+    expect(drafts.map((change) => change.source)).toEqual(['- draft\n- b\n', '- a\n- b\n']);
     expect(editor.isEditing).toBe(false);
-    expect(errors[0]?.message).toContain('frontmatter');
-    expect(editor.source).toBe('---\ntitle: T\n---\n');
+    expect(editor.snapshot()).toBe('- a\n- b\n');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(saved).not.toBe(editor.snapshot());
+  });
+
+  it('[TC-2-25-2] keeps file switch and destroy silent', () => {
+    const switched = setup('- a\n- b\n');
+    clickNode(switched.container, switched.view, nodeId(switched.editor, 'a'));
+    key(switched.container, ' ');
+    type(switched.container, 'draft');
+    expect(switched.drafts).toHaveLength(1);
+    switched.editor.setSource('- z\n');
+    expect(switched.drafts).toHaveLength(1);
+    expect(switched.editor.source).toBe('- z\n');
+
+    const destroyed = setup('- a\n- b\n');
+    clickNode(destroyed.container, destroyed.view, nodeId(destroyed.editor, 'a'));
+    key(destroyed.container, ' ');
+    type(destroyed.container, 'draft');
+    expect(destroyed.drafts).toHaveLength(1);
+    destroyed.editor.destroy();
+    expect(destroyed.drafts).toHaveLength(1);
+  });
+
+  it('[TC-2-25-3] emits no draft when a draftless session loses its rect', () => {
+    const { container, view, editor, drafts, changes } = setup('- a\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    expect(editor.isEditing).toBe(true);
+    view.hidden.add(nodeId(editor, 'a'));
+    view.emit('render');
+    expect(drafts).toHaveLength(0);
+    expect(changes).toHaveLength(0);
+    expect(editor.isEditing).toBe(false);
+    expect(editor.source).toBe('- a\n');
+  });
+});
+
+describe('Root heading', () => {
+  it('[TC-2-23-1] opens a root field with Space and typing', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, ' ');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('');
+    expect(editor.source).toBe('- a\n- b\n');
+    key(field(container), 'Escape');
+
+    key(container, 'R');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('R');
+    expect(editor.source).toBe('- a\n- b\n');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# R\n\n- a\n- b\n');
+  });
+
+  it('[TC-2-23-2] creates a root heading with Enter in one history entry', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('');
+    type(container, 'Root');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# Root\n\n- a\n- b\n');
+
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('# Root\n\n- a\n- b\n');
+  });
+
+  it('[TC-2-23-3] snapshots the draft heading and keeps typing', () => {
+    const { container, view, editor, drafts } = setup('- a\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, 'Enter');
+    type(container, 'Roo');
+    expect(editor.snapshot()).toBe('# Roo\n\n- a\n- b\n');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.isEditing).toBe(true);
+    expect(document.activeElement).toBe(field(container));
+    expect(drafts.at(-1)?.source).toBe('# Roo\n\n- a\n- b\n');
+
+    type(container, 'Root');
+    expect(editor.snapshot()).toBe('# Root\n\n- a\n- b\n');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# Root\n\n- a\n- b\n');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-23-4] cancels a reported root draft and restores the baseline', () => {
+    const { container, view, editor, drafts } = setup('- a\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, 'Enter');
+    type(container, 'Root');
+    expect(editor.snapshot()).toBe('# Root\n\n- a\n- b\n');
+    key(field(container), 'Escape');
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.canUndo).toBe(false);
+    expect(drafts.at(-1)?.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-1-14-7] types into an empty source root at its level', () => {
+    const { container, editor } = setup('##\n');
+    key(container, 'R');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('R');
+    expect(editor.source).toBe('##\n');
+    editor.commit();
+    expect(editor.source).toBe('## R\n');
+  });
+
+  it('[TC-2-23-5] shows the frame for a non-empty synthetic root', () => {
+    const list = setup('- a\n');
+    expect(list.container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'block',
+    );
+    const empty = setup('');
+    expect(empty.container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'none',
+    );
+    const heading = setup('##');
+    expect(
+      heading.container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display,
+    ).toBe('block');
+    const note = setup('A note.\n');
+    expect(note.container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'block',
+    );
+  });
+
+  it('[TC-2-23-6] reports a title or top-level H1 refusal without a source change', () => {
+    const title = setup('---\ntitle: T\n---\n\n## A\n\n## B\n');
+    key(title.container, ' ');
+    expect(title.editor.isEditing).toBe(false);
+    expect(title.errors[0]?.message).toContain('one H1');
+    key(title.container, 'Enter');
+    expect(title.errors).toHaveLength(2);
+    expect(title.errors[1]?.message).toContain('one H1');
+    expect(title.editor.source).toBe('---\ntitle: T\n---\n\n## A\n\n## B\n');
+
+    const h1 = setup('# A\n# B\n');
+    key(h1.container, 'R');
+    expect(h1.editor.isEditing).toBe(false);
+    expect(h1.errors[0]?.message).toContain('group the document under one H1');
+    key(h1.container, 'Enter');
+    expect(h1.editor.isEditing).toBe(false);
+    expect(h1.errors).toHaveLength(2);
+    expect(h1.errors[1]?.message).toContain('group the document under one H1');
+    expect(h1.editor.source).toBe('# A\n# B\n');
+  });
+
+  it('[TC-2-23-7] keeps the root non-deletable', () => {
+    const { container, view, editor, errors } = setup('- a\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, 'Delete');
+    expect(errors).toHaveLength(0);
+    expect(editor.source).toBe('- a\n- b\n');
+
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    key(field(container), 'Backspace');
+    expect(editor.isEditing).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(errors).toHaveLength(0);
+    key(field(container), 'Escape');
+  });
+
+  it('[TC-2-23-8] edits a title root with a single body heading in place', () => {
+    const { container, editor, errors } = setup('---\ntitle: T\n---\n\n## A\n');
+    key(container, ' ');
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('A');
+    type(container, 'B');
+    key(field(container), 'Enter');
+    expect(errors).toHaveLength(0);
+    expect(editor.source).toBe('---\ntitle: T\n---\n\n## B\n');
+    expect(editor.selected).toBe(editor.document.root);
+    expect(labelText(editor.document, editor.document.nodes.get(editor.document.root)!)).toBe('B');
+  });
+
+  it('[TC-2-23-9] creates and cancels a body H1 from a title root with a list', () => {
+    const created = setup('---\ntitle: T\n---\n\n- a\n');
+    key(created.container, ' ');
+    expect(created.editor.isEditing).toBe(true);
+    type(created.container, 'Body');
+    expect(created.editor.snapshot()).toBe('---\ntitle: T\n---\n\n# Body\n\n- a\n');
+    expect(created.editor.source).toBe('---\ntitle: T\n---\n\n- a\n');
+    key(field(created.container), 'Enter');
+    expect(created.editor.source).toBe('---\ntitle: T\n---\n\n# Body\n\n- a\n');
+    expect(
+      labelText(
+        created.editor.document,
+        created.editor.document.nodes.get(created.editor.document.root)!,
+      ),
+    ).toBe('Body');
+    expect(created.editor.undo()).toBe(true);
+    expect(created.editor.source).toBe('---\ntitle: T\n---\n\n- a\n');
+    expect(created.editor.redo()).toBe(true);
+    expect(created.editor.source).toBe('---\ntitle: T\n---\n\n# Body\n\n- a\n');
+
+    const cancelled = setup('---\ntitle: T\n---\n\n- a\n');
+    key(cancelled.container, ' ');
+    type(cancelled.container, 'Body');
+    key(field(cancelled.container), 'Escape');
+    expect(cancelled.editor.source).toBe('---\ntitle: T\n---\n\n- a\n');
+    expect(cancelled.editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-23-10] refuses a title root with a leading list and one heading child', () => {
+    const source = '---\ntitle: T\n---\n\n- a\n\n## B\n';
+    const { container, editor, errors } = setup(source);
+    key(container, ' ');
+    expect(editor.isEditing).toBe(false);
+    expect(errors[0]?.message).toContain('one H1');
+    key(container, 'Enter');
+    expect(errors).toHaveLength(2);
+    expect(errors[1]?.message).toContain('one H1');
+    expect(editor.source).toBe(source);
+    expect(editor.canUndo).toBe(false);
+    expect(editor.canRedo).toBe(false);
   });
 });
 

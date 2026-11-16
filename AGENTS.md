@@ -80,11 +80,12 @@ Process documents: `docs/process/sdlc.md`, `docs/process/testing.md`, `docs/proc
 
 All work happens in `.worktrees/<name>`, never in the main checkout; agents run in parallel. The directory is gitignored and the OpenCode project config points there.
 
-When the work is done, push the worktree branch and open a PR into `feat/editable-model`. Merge through GitHub after CI. Do not commit or merge directly into `feat/editable-model`.
+When the work is done, push the worktree branch and open a PR into `dev`. Merge through GitHub after CI. Do not commit or merge directly into `dev`.
 
 ## Markmap facts
 
 - `parse(markdown)` returns `{ root, frontmatter, gfm }`, where `root` is a `MarkmapNode`.
+- A single top-level heading at H1-H6 wins over a non-empty frontmatter `title` when it is the only top-level node; a leading list prevents promotion and the title stays the fallback root label.
 - `position` is the mdast range of the node. A heading position covers only the heading line.
 - This fork adds `source.label` and `source.block`. A heading block ends at the next heading with an equal or lower level, or at the end of the document.
 - Node ids are hashes of the parent id and the node text. A rename changes the id of the node and its descendants.

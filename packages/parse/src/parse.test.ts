@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type MarkmapNode, toPlainText, walkTree } from '@markmap/core';
+import type { Heading, Root } from 'mdast';
 import { describe, expect, it } from 'vitest';
 import { parse } from '.';
 
@@ -25,6 +26,14 @@ function idsByLabel(root: MarkmapNode): Map<string, string> {
   walkTree(root, (node) => void map.set(toPlainText(node.content), node.id));
   return map;
 }
+
+const copyHeadingPosition = () => (tree: Root) => {
+  const headings = tree.children.filter((child): child is Heading => child.type === 'heading');
+  const [source, target] = headings;
+  if (!source || !target) return;
+  target.position = source.position;
+  target.children = source.children;
+};
 
 describe('fixtures', () => {
   const files = readdirSync(fixtures).filter((name) => name.endsWith('.md'));
@@ -52,11 +61,12 @@ describe('parse', () => {
     expect(root.children).toHaveLength(2);
   });
 
-  it('prefers the frontmatter title over a single H1', () => {
+  it('keeps frontmatter title bytes when a body heading wins', () => {
     const { root, frontmatter } = parse('---\ntitle: T\nfoo: 1\n---\n\n# H1');
     expect(frontmatter).toEqual({ title: 'T', foo: 1 });
-    expect(toPlainText(root.content)).toBe('T');
-    expect(toPlainText(root.children[0].content)).toBe('H1');
+    expect(root.type).toBe('heading');
+    expect(toPlainText(root.content)).toBe('H1');
+    expect(root.children).toHaveLength(0);
   });
 
   it('ignores invalid frontmatter', () => {
@@ -158,6 +168,195 @@ function failOnce(error: Error) {
 const alwaysFail = () => () => {
   throw new SyntaxError('always');
 };
+
+describe('root promotion', () => {
+  it('[TC-1-17-1] promotes exactly one top-level heading at any depth', () => {
+    const cases = [
+      ['# A\n', 1],
+      ['## A\n', 2],
+      ['### A\n', 3],
+      ['###### A\n', 6],
+    ] as const;
+    for (const [markdown, depth] of cases) {
+      const { root } = parse(markdown);
+      expect(root.type).toBe('heading');
+      expect(root.data.depth).toBe(depth);
+      expect(toPlainText(root.content)).toBe('A');
+      expect(root.source?.block).toEqual({ start: 0, end: markdown.length });
+      expect(root.source?.label).toEqual({ start: depth + 1, end: depth + 2 });
+    }
+  });
+
+  it('[TC-1-17-2] keeps children and notes of a promoted H2 or H3', () => {
+    const markdown = '## A\n\nIntro.\n\n- x\n  - y\n';
+    const { root } = parse(markdown);
+    expect(root.type).toBe('heading');
+    expect(root.data.depth).toBe(2);
+    expect(toPlainText(root.content)).toBe('A');
+    expect(root.children.map((child) => toPlainText(child.content))).toEqual(['x']);
+    expect(root.notes).toHaveLength(1);
+    const note = root.notes[0];
+    if (!note?.source) throw new Error('No note source');
+    expect(markdown.slice(note.source.start, note.source.end)).toBe('Intro.');
+
+    const deep = parse('### A\n\n#### B\n').root;
+    expect(deep.type).toBe('heading');
+    expect(deep.data.depth).toBe(3);
+    expect(deep.children[0]?.data.depth).toBe(4);
+  });
+
+  it('[TC-1-17-3] keeps a title without a heading, multiple headings and a leading list unpromoted', () => {
+    const title = parse('---\ntitle: T\n---\n\n- a\n').root;
+    expect(title.type).toBe('root');
+    expect(toPlainText(title.content)).toBe('T');
+    expect(title.children.map((child) => toPlainText(child.content))).toEqual(['a']);
+
+    const titledTwo = parse('---\ntitle: T\n---\n\n## A\n\n## B\n').root;
+    expect(titledTwo.type).toBe('root');
+    expect(toPlainText(titledTwo.content)).toBe('T');
+    expect(titledTwo.children.map((child) => toPlainText(child.content))).toEqual(['A', 'B']);
+
+    const two = parse('## A\n\n## B\n').root;
+    expect(two.type).toBe('root');
+    expect(two.children.map((child) => toPlainText(child.content))).toEqual(['A', 'B']);
+
+    const list = parse('- a\n\n## B\n').root;
+    expect(list.type).toBe('root');
+    expect(list.children.map((child) => toPlainText(child.content))).toEqual(['a', 'B']);
+  });
+
+  it('[TC-1-17-7] promotes a single heading even with a frontmatter title', () => {
+    for (const [marker, depth] of [
+      ['#', 1],
+      ['##', 2],
+      ['######', 6],
+    ] as const) {
+      const { root, frontmatter } = parse(`---\ntitle: T\n---\n\n${marker} A\n`);
+      expect(frontmatter).toEqual({ title: 'T' });
+      expect(root.type).toBe('heading');
+      expect(root.data.depth).toBe(depth);
+      expect(toPlainText(root.content)).toBe('A');
+      expect(root.children).toHaveLength(0);
+    }
+  });
+
+  it('[TC-1-17-8] treats an empty title as absent', () => {
+    const promoted = parse("---\ntitle: ''\n---\n\n# A\n");
+    expect(promoted.frontmatter).toEqual({ title: '' });
+    expect(promoted.hasTitle).toBe(false);
+    expect(promoted.root.type).toBe('heading');
+    expect(toPlainText(promoted.root.content)).toBe('A');
+
+    const list = parse("---\ntitle: ''\n---\n\n- a\n");
+    expect(list.hasTitle).toBe(false);
+    expect(list.root.type).toBe('root');
+    expect(list.root.content).toEqual([]);
+    expect(list.root.children).toHaveLength(1);
+  });
+
+  it('[TC-1-17-4] promotes a single Setext heading and keeps its underline', () => {
+    const markdown = 'Title\n=====\n\nBody.\n';
+    const { root } = parse(markdown);
+    expect(root.type).toBe('heading');
+    expect(root.data.depth).toBe(1);
+    expect(toPlainText(root.content)).toBe('Title');
+    const block = root.source?.block;
+    if (!block) throw new Error('No block');
+    expect(markdown.slice(block.start, block.end)).toBe(markdown);
+
+    const sub = parse('Sub\n---\n').root;
+    expect(sub.type).toBe('heading');
+    expect(sub.data.depth).toBe(2);
+  });
+
+  it('[TC-1-17-5] ignores heading-like lines in code and note fences', () => {
+    const code = parse('```\n# Not a heading\n```\n').root;
+    expect(code.type).toBe('root');
+    expect(code.children).toHaveLength(0);
+    expect(code.notes).toHaveLength(1);
+
+    const note = parse('# A\n\n```markmap-note\n# Not a heading\n```\n').root;
+    expect(toPlainText(note.content)).toBe('A');
+    expect(note.children).toHaveLength(0);
+    expect(note.notes.map((item) => item.fence)).toEqual([true]);
+  });
+
+  it('[TC-1-17-6] exposes title presence and the body start', () => {
+    expect(parse('- a\n')).toMatchObject({ hasTitle: false, bodyStart: 0 });
+    expect(parse('').bodyStart).toBe(0);
+    expect(parse('\n\n').bodyStart).toBe(2);
+
+    const front = '---\nfoo: 1\n---\n# A\n';
+    const parsed = parse(front);
+    expect(parsed.hasTitle).toBe(false);
+    expect(parsed.bodyStart).toBe(front.indexOf('# A'));
+
+    expect(parse('---\ntitle: T\n---\n\n- a\n').hasTitle).toBe(true);
+    expect(parse('---\nfoo: 1\n---\n').bodyStart).toBe('---\nfoo: 1\n---\n'.length);
+
+    const crlf = '---\r\nfoo: 1\r\n---\r\n# A\r\n';
+    expect(parse(crlf).bodyStart).toBe(crlf.indexOf('# A'));
+  });
+});
+
+describe('source offsets', () => {
+  it('[TC-1-14-1] normalizes offsets after a byte order mark', () => {
+    const markdown = '\uFEFF# A\n\nNote.\n\n## B\n';
+    const { root } = parse(markdown);
+    expect(root.type).toBe('heading');
+    expect(root.position).toEqual({ start: 1, end: 4 });
+    expect(root.source?.block).toEqual({ start: 1, end: markdown.length });
+    expect(root.source?.label).toEqual({ start: 3, end: 4 });
+    const label = root.source?.label;
+    if (!label) throw new Error('No label');
+    expect(markdown.slice(label.start, label.end)).toBe('A');
+
+    const note = root.notes[0];
+    if (!note?.source) throw new Error('No note source');
+    expect(markdown.slice(note.source.start, note.source.end)).toBe('Note.');
+
+    const child = root.children[0];
+    expect(child?.source?.label).toEqual({
+      start: markdown.indexOf('B'),
+      end: markdown.indexOf('B') + 1,
+    });
+    expect(child?.source?.block).toEqual({
+      start: markdown.indexOf('## B'),
+      end: markdown.length,
+    });
+  });
+
+  it('[TC-1-14-2] normalizes offsets after a byte order mark and frontmatter', () => {
+    const markdown = '\uFEFF---\nfoo: 1\n---\n# A\n';
+    const parsed = parse(markdown);
+    expect(parsed.hasTitle).toBe(false);
+    expect(parsed.frontmatter).toEqual({ foo: 1 });
+    expect(parsed.bodyStart).toBe(markdown.indexOf('# A'));
+    expect(parsed.root.type).toBe('heading');
+    expect(parsed.root.source?.label).toEqual({
+      start: markdown.indexOf('A'),
+      end: markdown.indexOf('A') + 1,
+    });
+    expect(parsed.root.source?.block?.start).toBe(markdown.indexOf('# A'));
+
+    const titled = parse('\uFEFF---\ntitle: T\n---\n\n# A\n');
+    expect(titled.hasTitle).toBe(true);
+    expect(toPlainText(titled.root.content)).toBe('A');
+    expect(titled.root.type).toBe('heading');
+    expect(titled.root.source?.label?.start).toBe('\uFEFF---\ntitle: T\n---\n\n# A\n'.indexOf('A'));
+  });
+
+  it('[TC-1-14-11] shifts plugin-copied positions exactly once', () => {
+    const markdown = '\uFEFF# A\n\n# B\n';
+    const { root } = parse(markdown, { plugins: [copyHeadingPosition] });
+    const second = root.children[1];
+    expect(second?.source?.block?.start).toBe(1);
+    expect(second?.source?.label).toEqual({ start: 3, end: 4 });
+    const label = second?.source?.label;
+    if (!label) throw new Error('No label');
+    expect(markdown.slice(label.start, label.end)).toBe('A');
+  });
+});
 
 describe('when GFM is not supported', () => {
   it('falls back to parsing without GFM on a SyntaxError', () => {

@@ -6,11 +6,13 @@ Markmap reads ordinary Markdown, with [GFM](https://github.github.com/gfm/) exte
 
 ## Branches
 
-Only headings and list items become nodes. A single `# Heading` becomes the root. Otherwise the root comes from `title` in the frontmatter, or stays empty.
+Only headings and list items become nodes. When the only top-level node is a heading at H1-H6, it becomes the root even if a non-empty `title` is present. A leading list means there are multiple top-level nodes, so no promotion happens. The `title` supplies the root label only when no promotion happens. Otherwise the root stays empty.
+
+New branches use heading markers only at H1 and H2: a child of an H1 root or heading becomes H2, and a child of an H2 or deeper heading becomes a list item, as does a sibling of an H3-H6 heading. Existing H3-H6 headings in a file still render and edit in place.
 
 ```md
 ---
-title: Used when there is no single H1
+title: Used when the body has no single top-level heading
 ---
 
 ## A heading is a branch

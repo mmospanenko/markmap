@@ -199,14 +199,14 @@ describe('edit edges', () => {
     );
   });
 
-  it('[TC-1-8-16] inserts into an empty and a titled root', () => {
+  it('[TC-1-8-16] inserts into an empty root and a body heading root with title', () => {
     const empty = buildDocument('');
     const first = applyCommand(empty, { type: 'insertChild', node: empty.root, text: 'A' });
     expect(first.document.source).toBe('- A');
 
     const titled = buildDocument('---\ntitle: T\n---\n\n# A\n');
     const second = applyCommand(titled, { type: 'insertChild', node: titled.root, text: 'B' });
-    expect(second.document.source).toBe('---\ntitle: T\n---\n\n# A\n# B\n');
+    expect(second.document.source).toBe('---\ntitle: T\n---\n\n# A\n## B\n');
   });
 
   it('[TC-1-8-17] deletes a CRLF item at end of file', () => {
@@ -235,7 +235,7 @@ describe('edit edges', () => {
       source: { block: { start: 0, end: 7 } },
       children: [],
     };
-    const doc = buildFromTree('###### A', tree);
+    const doc = buildFromTree('###### A', tree, { hasTitle: false, bodyStart: 0 });
     expect(() => applyCommand(doc, { type: 'insertChild', node: 'root', text: 'B' })).toThrowError(
       EditError,
     );
@@ -253,58 +253,65 @@ describe('edit edges', () => {
   });
 
   it('[TC-1-8-21] inserts the first heading into an empty or blank document', () => {
-    for (const source of ['', '\n', '\n\n', '  ', '\r\n']) {
+    const cases = [
+      ['', '# First note', 2, 2],
+      ['\n', '\n# First note\n', 3, 3],
+      ['\n\n', '\n\n# First note\n', 4, 4],
+      ['  ', '  \n# First note', 5, 5],
+      ['\r\n', '\r\n# First note\r\n', 4, 4],
+    ] as const;
+    for (const [source, expected, selection, labelStart] of cases) {
       const doc = buildDocument(source);
       const result = applyCommand(doc, {
-        type: 'insertFirst',
+        type: 'createRootHeading',
         node: doc.root,
         text: 'First note',
       });
-      expect(result.document.source).toBe('# First note');
-      expect(result.selection).toBe(2);
+      expect(result.document.source).toBe(expected);
+      expect(result.selection).toBe(selection);
       expect(result.document.nodes.size).toBe(1);
       expect(result.document.nodes.get(result.document.root)?.label).toEqual({
-        start: 2,
-        end: 12,
+        start: labelStart,
+        end: labelStart + 10,
       });
     }
   });
 
-  it('[TC-1-8-22] appends the first heading after frontmatter', () => {
-    const withNewline = buildDocument('---\ntitle: T\n---\n');
+  it('[TC-1-8-22] appends the first heading after frontmatter without a title', () => {
+    const withNewline = buildDocument('---\nfoo: 1\n---\n');
     expect(
       applyCommand(withNewline, {
-        type: 'insertFirst',
+        type: 'createRootHeading',
         node: withNewline.root,
         text: 'First note',
       }).document.source,
-    ).toBe('---\ntitle: T\n---\n# First note\n');
+    ).toBe('---\nfoo: 1\n---\n# First note\n');
 
-    const withoutNewline = buildDocument('---\ntitle: T\n---');
+    const withoutNewline = buildDocument('---\nfoo: 1\n---');
     expect(
       applyCommand(withoutNewline, {
-        type: 'insertFirst',
+        type: 'createRootHeading',
         node: withoutNewline.root,
         text: 'First note',
       }).document.source,
-    ).toBe('---\ntitle: T\n---\n# First note');
+    ).toBe('---\nfoo: 1\n---\n# First note');
   });
 
   it('[TC-1-8-23] rejects a first heading on a populated root or an empty label', () => {
     const titled = buildDocument('# A\n');
     expect(() =>
-      applyCommand(titled, { type: 'insertFirst', node: titled.root, text: 'B' }),
+      applyCommand(titled, { type: 'createRootHeading', node: titled.root, text: 'B' }),
     ).toThrowError(EditError);
 
     const empty = buildDocument('');
     expect(() =>
-      applyCommand(empty, { type: 'insertFirst', node: empty.root, text: '  ' }),
+      applyCommand(empty, { type: 'createRootHeading', node: empty.root, text: '  ' }),
     ).toThrowError(EditError);
   });
 
   it('[TC-1-8-24] edits and adds a child after the first heading', () => {
     const doc = buildDocument('');
-    const first = applyCommand(doc, { type: 'insertFirst', node: doc.root, text: 'A' });
+    const first = applyCommand(doc, { type: 'createRootHeading', node: doc.root, text: 'A' });
     const renamed = applyCommand(first.document, {
       type: 'setLabel',
       node: first.document.root,
@@ -318,6 +325,43 @@ describe('edit edges', () => {
       text: 'C',
     });
     expect(child.document.source).toBe('# B\n## C');
+  });
+
+  it('[TC-1-8-25] rejects a list fallback whose parent is not a heading', () => {
+    const tree = {
+      id: 'root',
+      type: 'root',
+      content: [],
+      notes: [],
+      data: {},
+      children: [
+        {
+          id: 'item',
+          type: 'listItem',
+          content: [],
+          notes: [],
+          data: {},
+          source: { block: { start: 0, end: 6 }, label: { start: 2, end: 6 } },
+          children: [
+            {
+              id: 'deep',
+              type: 'heading',
+              content: [],
+              notes: [],
+              data: { depth: 3 },
+              source: { block: { start: 7, end: 15 }, label: { start: 11, end: 15 } },
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+    const doc = buildFromTree('- item\n### Deep\n', tree, { hasTitle: false, bodyStart: 0 });
+    expect(doc.nodes.get('deep')?.kind).toBe('heading');
+    expect(doc.nodes.get('deep')?.parent).toBe('item');
+    expect(() =>
+      applyCommand(doc, { type: 'insertSibling', node: 'deep', text: 'x' }),
+    ).toThrowError(/heading parent/);
   });
 });
 

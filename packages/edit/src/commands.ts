@@ -1,11 +1,13 @@
 import type { MarkmapNode } from '@markmap/core';
 import {
   contentIndent,
+  contentNodeCount,
   firstLine,
   labelText,
   lineEnd,
   lineStart,
   normalizeNoteText,
+  noteText,
   notesText,
   parseDocument,
   validateDocument,
@@ -42,7 +44,7 @@ import { applySplices, mapOffset, type Splice } from './splice';
 export type Command =
   | { type: 'setLabel'; node: string; text: string }
   | { type: 'setNotes'; node: string; text: string }
-  | { type: 'insertFirst'; node: string; text: string }
+  | { type: 'createRootHeading'; node: string; text: string }
   | { type: 'insertChild'; node: string; text?: string }
   | { type: 'insertSibling'; node: string; text?: string }
   | { type: 'insertBlock'; node: string; text: string }
@@ -95,8 +97,8 @@ function planCommand(doc: Document, command: Command): Plan {
       return planSetLabel(doc, node, command.text);
     case 'setNotes':
       return planSetNotes(doc, node, command.text);
-    case 'insertFirst':
-      return planInsertFirst(doc, node, command.text);
+    case 'createRootHeading':
+      return planCreateRootHeading(doc, node, command.text);
     case 'insertChild':
       return planInsert(doc, node, command.text ?? '', 'child');
     case 'insertSibling':
@@ -119,27 +121,37 @@ function planSetLabel(doc: Document, node: EditNode, raw: string): Plan {
   if (!node.label) throw new EditError('E_LABEL', 'The node has no editable label', node.id);
   const text = cleanLabel(raw);
   let insert: string;
+  let expected: string;
   if (node.kind === 'heading' || node.kind === 'root') {
     assertSingleLine(node, text);
-    insert = text;
+    insert = headingLabelInsertion(doc, node, text);
+    expected = text;
   } else {
     insert = formatListText(node, text, lineEnding(doc.source));
+    expected = insert;
   }
   const blockStart = node.block?.start;
   return {
     edits: [{ from: node.label.start, to: node.label.end, insert }],
     selection: { kind: 'insert', edit: 0, offset: insert.length },
     verify(next) {
-      if (next.nodes.size !== doc.nodes.size) throw shape('The node count changed');
+      if (contentNodeCount(next) !== contentNodeCount(doc)) throw shape('The node count changed');
       const found = blockStart == null ? undefined : nodeByBlockStart(next, blockStart);
       if (!found || found.kind !== node.kind || found.parent !== node.parent) {
         throw shape('The edited node changed shape');
       }
-      if (!found.label || next.source.slice(found.label.start, found.label.end) !== insert) {
+      if (!found.label || next.source.slice(found.label.start, found.label.end) !== expected) {
         throw shape('The label did not survive parsing');
       }
     },
   };
+}
+
+function headingLabelInsertion(doc: Document, node: EditNode, text: string): string {
+  if (!node.label || node.label.start !== node.label.end) return text;
+  const before = doc.source[node.label.start - 1];
+  const after = doc.source[node.label.start];
+  return before === '#' && after !== ' ' && after !== '\t' ? ` ${text}` : text;
 }
 
 function planSetNotes(doc: Document, node: EditNode, raw: string): Plan {
@@ -149,32 +161,30 @@ function planSetNotes(doc: Document, node: EditNode, raw: string): Plan {
   const text = normalizeNoteText(raw);
   const offset = noteAnchor(node);
   const notes = [...node.notes].toSorted((a, b) => a.range.start - b.range.start);
-  const verify = (next: Document): void => verifyNotes(doc, node, next, text);
+  let edits: Splice[];
 
   if (!text) {
-    const edits = noteCuts(doc.source, notes).map((cut) => ({
+    edits = noteCuts(doc.source, notes).map((cut) => ({
       from: cut.start,
       to: cut.end,
       insert: '',
     }));
-    return { edits, selection: { kind: 'source', offset }, verify };
-  }
+  } else if (notes.length === 1 && notes[0]?.fence && notesText(doc, node) === text) {
+    edits = [];
+  } else {
+    const ending = lineEnding(doc.source);
+    const position = notesInsertion(doc, node);
+    const fence = fenceText(text, contentIndent(node), ending);
+    const atLineStart = position === 0 || doc.source[position - 1] === '\n';
+    let insert = atLineStart ? fence : ending + fence;
+    if (atLineStart || position < doc.source.length) insert += ending;
 
-  if (notes.length === 1 && notes[0]?.fence && notesText(doc, node) === text) {
-    return { edits: [], selection: { kind: 'source', offset }, verify };
+    edits = [{ from: position, to: position, insert }];
+    for (const cut of noteCuts(doc.source, notes)) {
+      edits.push({ from: cut.start, to: cut.end, insert: '' });
+    }
   }
-
-  const ending = lineEnding(doc.source);
-  const position = notesInsertion(doc, node);
-  const fence = fenceText(text, contentIndent(node), ending);
-  const atLineStart = position === 0 || doc.source[position - 1] === '\n';
-  let insert = atLineStart ? fence : ending + fence;
-  if (atLineStart || position < doc.source.length) insert += ending;
-
-  const edits: Splice[] = [{ from: position, to: position, insert }];
-  for (const cut of noteCuts(doc.source, notes)) {
-    edits.push({ from: cut.start, to: cut.end, insert: '' });
-  }
+  const verify = (next: Document): void => verifyNotes(doc, node, next, text, edits);
   return { edits, selection: { kind: 'source', offset }, verify };
 }
 
@@ -236,8 +246,16 @@ function fenceLength(text: string): number {
   return Math.max(3, longest + 1);
 }
 
-function verifyNotes(doc: Document, node: EditNode, next: Document, text: string): void {
-  const found = node.block ? nodeByBlockStart(next, node.block.start) : next.nodes.get(next.root);
+function verifyNotes(
+  doc: Document,
+  node: EditNode,
+  next: Document,
+  text: string,
+  edits: Splice[],
+): void {
+  const found = node.block
+    ? nodeByBlockStart(next, mapOffset(edits, node.block.start))
+    : next.nodes.get(next.root);
   const sameChildren =
     found !== undefined &&
     found.children.length === node.children.length &&
@@ -245,52 +263,141 @@ function verifyNotes(doc: Document, node: EditNode, next: Document, text: string
   const notes = found ? found.notes : [];
   const sameNotes = text ? notes.length === 1 && notes[0]?.fence === true : notes.length === 0;
   const sameText = !text || (found !== undefined && notesText(next, found) === text);
-  if (!found || next.nodes.size !== doc.nodes.size || !sameChildren || !sameNotes || !sameText) {
+  if (
+    !found ||
+    contentNodeCount(next) !== contentNodeCount(doc) ||
+    !sameChildren ||
+    !sameNotes ||
+    !sameText
+  ) {
     throw shape('The note change did not survive parsing');
   }
 }
 
-function planInsertFirst(doc: Document, node: EditNode, raw: string): Plan {
-  if (node.kind !== 'root' || node.block || node.children.length > 0) {
-    throw new EditError('E_CAPABILITY', 'The node is not an empty root', node.id);
+export function rootHeadingRefusal(doc: Document, nodeId?: string): EditError | null {
+  const policy = doc.rootPolicy;
+  if (policy.kind === 'source-heading') {
+    return new EditError('E_ROOT_EXISTS', 'The document already has a root heading', nodeId);
   }
+  if (policy.kind === 'title' && !policy.canCreateHeading) {
+    return new EditError(
+      'E_ROOT_TITLE',
+      'Merge the body under one H1 to give the map a body root',
+      nodeId,
+    );
+  }
+  if (!policy.canCreateHeading) {
+    return new EditError(
+      'E_ROOT_H1',
+      'Add a frontmatter title or group the document under one H1',
+      nodeId,
+    );
+  }
+  return null;
+}
+
+function bodyContentStart(doc: Document): number {
+  const source = doc.source;
+  let offset = doc.rootPolicy.bodyStart;
+  while (offset < source.length) {
+    const end = lineEnd(source, offset);
+    if (source.slice(offset, end).trim()) return offset;
+    offset = end + newlineLengthAt(source, end);
+  }
+  return source.length;
+}
+
+function planCreateRootHeading(doc: Document, node: EditNode, raw: string): Plan {
+  if (node.kind !== 'root') {
+    throw new EditError('E_CAPABILITY', 'Only the root can create a root heading', node.id);
+  }
+  const refusal = rootHeadingRefusal(doc, node.id);
+  if (refusal) throw refusal;
   const text = cleanLabel(raw);
   if (!text) throw new EditError('E_LABEL', 'The label cannot be empty', node.id);
   assertSingleLine(node, text);
   const line = headingLine(1, text);
+  const ending = lineEnding(doc.source);
+  const position = bodyContentStart(doc);
+  let edits: Splice[];
+  let selectionOffset: number;
+
+  if (position === doc.source.length) {
+    const inserted = insertLine(doc.source, position, line, ending);
+    edits = [{ from: position, to: position, insert: inserted.insert }];
+    selectionOffset = inserted.leading + 2;
+  } else {
+    edits = [{ from: position, to: position, insert: line + ending + ending }];
+    selectionOffset = 2;
+  }
+
   const verify = (next: Document, selection: number): void => {
+    if (contentNodeCount(next) !== contentNodeCount(doc) + 1) {
+      throw shape('The root heading changed the content node count');
+    }
     const created = nodeByLabelStart(next, selection);
     if (
       !created ||
+      created.id !== next.root ||
+      created.kind !== 'root' ||
+      created.level !== 1 ||
       !created.block ||
       !created.label ||
-      (created.kind !== 'root' && created.kind !== 'heading') ||
-      created.level !== 1
+      next.source.slice(created.label.start, created.label.end) !== text
     ) {
-      throw shape('The first node is not an editable heading');
+      throw shape('The first node is not an editable root heading');
     }
-    if (next.source.slice(created.label.start, created.label.end) !== text) {
-      throw shape('The first label did not survive parsing');
+    const expected: string[] = [created.id];
+    for (const id of doc.order) {
+      if (id === doc.root) continue;
+      const old = doc.nodes.get(id);
+      if (!old?.block) throw shape('The original node has no block');
+      const found = nodeByBlockStart(next, mapOffset(edits, old.block.start));
+      if (!found) throw shape('The original node did not survive the root heading');
+      expected.push(found.id);
+      if (old.parent === doc.root) {
+        if (found.parent !== created.id) {
+          throw shape('The original node is not a child of the new root');
+        }
+      } else {
+        const oldParent = old.parent ? doc.nodes.get(old.parent) : undefined;
+        const newParent = found.parent ? next.nodes.get(found.parent) : undefined;
+        if (
+          !oldParent?.block ||
+          !newParent?.block ||
+          newParent.block.start !== mapOffset(edits, oldParent.block.start)
+        ) {
+          throw shape('The original parent edge changed');
+        }
+      }
     }
-    if (next.nodes.size !== 1 && next.nodes.size !== 2) {
-      throw shape('The first node changed the node count');
+    if (expected.join('\u0000') !== next.order.join('\u0000')) {
+      throw shape('The original node order changed');
     }
   };
 
-  if (doc.source.trim() === '') {
-    return {
-      edits: [{ from: 0, to: doc.source.length, insert: line }],
-      selection: { kind: 'insert', edit: 0, offset: 2 },
-      verify,
-    };
-  }
+  return { edits, selection: { kind: 'insert', edit: 0, offset: selectionOffset }, verify };
+}
 
-  const position = doc.source.length;
-  const inserted = insertLine(doc.source, position, line, lineEnding(doc.source));
+function headingContentInsertion(doc: Document, node: EditNode): number {
+  for (const id of node.children) {
+    const child = doc.nodes.get(id);
+    if (child?.kind === 'heading' && child.block) return child.block.start;
+  }
+  return node.block?.end ?? doc.source.length;
+}
+
+function headingListLine(
+  doc: Document,
+  node: EditNode,
+  text: string,
+  ending: string,
+): { line: string; markerLength: number } {
+  const indent = childListIndent(doc, node);
+  const marker = childMarker(doc, node);
   return {
-    edits: [{ from: position, to: position, insert: inserted.insert }],
-    selection: { kind: 'insert', edit: 0, offset: inserted.leading + 2 },
-    verify,
+    line: listLine(indent, marker, text, ending),
+    markerLength: indent.length + marker.length + 1,
   };
 }
 
@@ -302,29 +409,43 @@ function planInsert(doc: Document, node: EditNode, raw: string, mode: 'child' | 
   let line: string;
   let markerLength: number;
   let parentId: string;
+  let expectedKind: 'heading' | 'listItem' = 'listItem';
+  let expectedLevel = 0;
 
   if (node.kind === 'root') {
     parentId = node.id;
     if (node.block) {
-      position = node.block.end;
-      if (node.level >= 1 && node.level < 6) {
+      if (node.level === 1) {
+        position = node.block.end;
+        expectedKind = 'heading';
+        expectedLevel = 2;
         assertSingleLine(node, text);
-        line = headingLine(node.level + 1, text);
-        markerLength = node.level + 2;
+        line = headingLine(expectedLevel, text);
+        markerLength = expectedLevel + 1;
       } else {
-        line = listLine('', '-', text, ending);
-        markerLength = 2;
+        position = headingContentInsertion(doc, node);
+        const list = headingListLine(doc, node, text, ending);
+        line = list.line;
+        markerLength = list.markerLength;
       }
     } else {
-      position = doc.source.length;
       const last = node.children.length
         ? doc.nodes.get(node.children[node.children.length - 1])
         : undefined;
-      if (last?.kind === 'heading' && last.level >= 1) {
+      if (last?.kind === 'heading' && (last.level === 1 || last.level === 2)) {
+        position = doc.source.length;
+        expectedKind = 'heading';
+        expectedLevel = last.level;
         assertSingleLine(node, text);
-        line = headingLine(last.level, text);
-        markerLength = last.level + 1;
+        line = headingLine(expectedLevel, text);
+        markerLength = expectedLevel + 1;
+      } else if (last?.kind === 'heading') {
+        position = headingContentInsertion(doc, node);
+        const list = headingListLine(doc, node, text, ending);
+        line = list.line;
+        markerLength = list.markerLength;
       } else {
+        position = doc.source.length;
         const indent = last?.kind === 'listItem' ? (last.list?.indent ?? '') : '';
         const marker = last?.kind === 'listItem' ? (last.list?.marker ?? '-') : '-';
         line = listLine(indent, marker, text, ending);
@@ -333,13 +454,27 @@ function planInsert(doc: Document, node: EditNode, raw: string, mode: 'child' | 
     }
   } else if (node.kind === 'heading') {
     if (!node.block) throw shape('The heading has no block');
-    position = node.block.end;
     const level = mode === 'sibling' ? node.level : node.level + 1;
-    if (level > 6) throw new EditError('E_LEVEL', 'Heading level cannot exceed six', node.id);
-    assertSingleLine(node, text);
-    line = headingLine(level, text);
-    markerLength = level + 1;
-    parentId = mode === 'sibling' ? (node.parent ?? node.id) : node.id;
+    if (level <= 2) {
+      position = node.block.end;
+      expectedKind = 'heading';
+      expectedLevel = level;
+      assertSingleLine(node, text);
+      line = headingLine(level, text);
+      markerLength = level + 1;
+      parentId = mode === 'sibling' ? (node.parent ?? node.id) : node.id;
+    } else {
+      const parent =
+        mode === 'sibling' ? (node.parent ? doc.nodes.get(node.parent) : undefined) : node;
+      if (!parent || (parent.kind !== 'heading' && parent.kind !== 'root')) {
+        throw shape('The list fallback has no heading parent');
+      }
+      position = headingContentInsertion(doc, parent);
+      const list = headingListLine(doc, parent, text, ending);
+      line = list.line;
+      markerLength = list.markerLength;
+      parentId = parent.id;
+    }
   } else {
     if (!node.block || !node.list) throw shape('The list item has no block');
     position = node.block.end;
@@ -356,10 +491,13 @@ function planInsert(doc: Document, node: EditNode, raw: string, mode: 'child' | 
     edits: [{ from: position, to: position, insert: inserted.insert }],
     selection: { kind: 'insert', edit: 0, offset: inserted.leading + markerLength },
     verify(next, selection) {
-      if (next.nodes.size !== doc.nodes.size + 1) throw shape('The node count did not grow');
+      if (contentNodeCount(next) !== contentNodeCount(doc) + 1)
+        throw shape('The node count did not grow');
       const created = nodeByLabelStart(next, selection);
-      if (!created || created.parent !== parentId)
+      if (!created || created.kind !== expectedKind || created.parent !== parentId)
         throw shape('The new node landed in the wrong place');
+      if (expectedKind === 'heading' && created.level !== expectedLevel)
+        throw shape('The new heading has the wrong level');
       if (
         !created.label ||
         next.source.slice(created.label.start, created.label.end) !== expectedLabel
@@ -378,6 +516,41 @@ function normalizeBlockText(raw: string, ending: string): string {
   return ending === '\n' ? trimmed : trimmed.replace(/\n/g, ending);
 }
 
+function contentRootNode(doc: Document): EditNode | undefined {
+  const root = doc.nodes.get(doc.root);
+  if (!root) return undefined;
+  if (root.block) return root;
+  return root.children
+    .map((id) => doc.nodes.get(id))
+    .find((child): child is EditNode => Boolean(child?.block));
+}
+
+function removeRanges(text: string, ranges: readonly Range[]): string {
+  let result = '';
+  let last = 0;
+  for (const range of ranges.toSorted((a, b) => a.start - b.start)) {
+    result += text.slice(last, range.start);
+    last = range.end;
+  }
+  return result + text.slice(last);
+}
+
+function attachLeadingNotes(
+  moved: string,
+  notes: readonly string[],
+  indent: string | null,
+  ending: string,
+): string {
+  if (!notes.length) return moved;
+  const firstBreak = moved.indexOf(ending);
+  const head = firstBreak === -1 ? moved : moved.slice(0, firstBreak);
+  let rest = firstBreak === -1 ? '' : moved.slice(firstBreak + ending.length);
+  while (rest.startsWith(ending)) rest = rest.slice(ending.length);
+  const joined = notes.join(ending + ending);
+  const text = indent === null ? joined : reindentList(joined, indent.length, ending);
+  return `${head}${ending}${ending}${text}${rest ? ending + ending + rest : ''}`;
+}
+
 function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
   requireCapability(node, 'addChild');
   const ending = lineEnding(doc.source);
@@ -391,32 +564,76 @@ function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
     : fragmentRoot.children
         .map((id) => fragment.nodes.get(id))
         .find((child): child is EditNode => Boolean(child?.block));
-  if (!top || !top.label) {
+  if (
+    !top ||
+    !top.label ||
+    (top.kind !== 'heading' && top.kind !== 'root' && top.kind !== 'listItem')
+  ) {
     throw new EditError('E_SHAPE', 'The pasted text has no editable node', node.id);
   }
-  const count = fragment.nodes.size - (fragmentRoot.block ? 0 : 1);
+  const count = contentNodeCount(fragment);
+  const blockStart = top.block?.start ?? 0;
+  const prefixNotes = top.notes
+    .filter((note) => note.range.end <= blockStart)
+    .toSorted((a, b) => a.range.start - b.range.start);
+  if (top.kind === 'heading' || top.kind === 'root') {
+    const rest = removeRanges(
+      block.slice(0, blockStart),
+      prefixNotes.map((note) => note.range),
+    );
+    if (rest.trim()) {
+      throw new EditError(
+        'E_SHAPE',
+        'The pasted prefix has content that cannot become a note',
+        node.id,
+      );
+    }
+  }
+  const leading = prefixNotes.map((note) => block.slice(note.range.start, note.range.end));
+  const body = top.kind === 'heading' || top.kind === 'root' ? block.slice(blockStart) : block;
+  const prefixTexts = prefixNotes.map((note) => normalizeNoteText(noteText(fragment, top, note)));
+  const prefixFences = prefixNotes.map((note) => note.fence);
+  let converted: string;
   let moved: string;
   if (top.kind === 'heading' || top.kind === 'root') {
     if (node.kind === 'listItem') {
-      moved = headingsToList(block, childIndent(doc, node), doc.unit, ending);
+      const indent = childIndent(doc, node);
+      converted = headingsToList(body, indent, doc.unit, ending);
+      moved = attachLeadingNotes(converted, leading, indent + '  ', ending);
     } else {
       const parentLevel = node.kind === 'root' ? (node.block ? node.level : 0) : node.level;
-      moved = shiftHeadings(block, parentLevel + 1 - top.level, ending);
+      converted = shiftHeadings(body, parentLevel + 1 - top.level, ending);
+      moved = attachLeadingNotes(converted, leading, null, ending);
     }
-  } else if (top.kind === 'listItem') {
+  } else {
     if (!top.list) throw shape('The pasted list item has no list info');
     const indent = node.kind === 'listItem' ? childIndent(doc, node) : '';
-    moved = reindentList(block, indent.length - top.list.indent.length, ending);
-  } else {
-    throw new EditError('E_SHAPE', 'The pasted text has no editable node', node.id);
+    converted = reindentList(body, indent.length - top.list.indent.length, ending);
+    moved = converted;
+  }
+  const convertedDoc = parseDocument(converted).document;
+  const convertedRoot = contentRootNode(convertedDoc);
+  const bodyNotes = convertedRoot?.notes ?? [];
+  const bodyTexts = convertedRoot
+    ? bodyNotes.map((note) => normalizeNoteText(noteText(convertedDoc, convertedRoot, note)))
+    : [];
+  const bodyFences = bodyNotes.map((note) => note.fence);
+  const movedDoc = parseDocument(moved).document;
+  const movedRoot = contentRootNode(movedDoc);
+  const movedNotes = movedRoot?.notes ?? [];
+  const expectedTexts = [...prefixTexts, ...bodyTexts];
+  const expectedFences = [...prefixFences, ...bodyFences];
+  if (movedNotes.length !== expectedTexts.length) {
+    throw shape('The moved root notes changed');
   }
   const position = node.block ? node.block.end : doc.source.length;
   const placed = blockInsertion(doc.source, position, moved, ending);
+  const marker = firstLineMarker(moved);
   const expected = firstLine(fragment.source, top.label.start).replace(/\r$/u, '');
   const emptyRoot = node.kind === 'root' && !node.block && node.children.length === 0;
   return {
     edits: [{ from: position, to: position, insert: placed.insert }],
-    selection: { kind: 'insert', edit: 0, offset: placed.leading + firstLineMarker(moved) },
+    selection: { kind: 'insert', edit: 0, offset: placed.leading + marker },
     verify(next, selection) {
       const created = nodeByLabelStart(next, selection);
       if (!created) throw shape('The pasted root did not survive parsing');
@@ -424,6 +641,64 @@ function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
         throw shape('The pasted subtree landed in the wrong place');
       }
       if (countSubtree(next, created) !== count) throw shape('The pasted subtree changed shape');
+      if (contentNodeCount(next) !== contentNodeCount(doc) + count) {
+        throw shape('The pasted content changed the node count');
+      }
+      const insertedStart = selection - marker;
+      if (next.source.slice(insertedStart, insertedStart + moved.length) !== moved) {
+        throw shape('The pasted block changed');
+      }
+      const target = next.nodes.get(node.id);
+      if (target && target.id !== created.id) {
+        const sameNotes =
+          target.notes.length === node.notes.length &&
+          target.notes.every((note, index) => {
+            const before = node.notes[index];
+            return (
+              before !== undefined &&
+              note.range.start === before.range.start &&
+              note.range.end === before.range.end &&
+              note.fence === before.fence
+            );
+          });
+        if (!sameNotes) throw shape('The pasted notes attached to the target');
+      }
+      const promoted = emptyRoot && created.id === next.root;
+      const targetNotes = promoted ? node.notes : [];
+      const expectedAllTexts = [
+        ...targetNotes.map((note) => normalizeNoteText(noteText(doc, node, note))),
+        ...expectedTexts,
+      ];
+      const expectedAllFences = [...targetNotes.map((note) => note.fence), ...expectedFences];
+      const expectedRanges = [
+        ...targetNotes.map((note) => note.range),
+        ...movedNotes.map((note) => ({
+          start: insertedStart + note.range.start,
+          end: insertedStart + note.range.end,
+        })),
+      ];
+      if (created.notes.length !== expectedAllTexts.length) {
+        throw shape('The pasted root lost or gained notes');
+      }
+      for (let index = 0; index < created.notes.length; index += 1) {
+        const note = created.notes[index];
+        const range = expectedRanges[index];
+        if (!note || !range || note.fence !== expectedAllFences[index]) {
+          throw shape('The pasted note fences changed');
+        }
+        if (note.range.start !== range.start || note.range.end !== range.end) {
+          throw shape('The pasted note ranges changed');
+        }
+        if (normalizeNoteText(noteText(next, created, note)) !== expectedAllTexts[index]) {
+          throw shape('The pasted note text changed');
+        }
+        if (
+          index >= targetNotes.length &&
+          (note.range.start < insertedStart || note.range.end > insertedStart + moved.length)
+        ) {
+          throw shape('The pasted note is outside the inserted block');
+        }
+      }
       if (
         !created.label ||
         firstLine(next.source, created.label.start).replace(/\r$/u, '') !== expected
@@ -447,7 +722,7 @@ function planDelete(doc: Document, node: EditNode): Plan {
     edits: [{ from: cut.start, to: cut.end, insert: '' }],
     selection: { kind: 'source', offset: target },
     verify(next) {
-      if (next.nodes.size !== doc.nodes.size - removed)
+      if (contentNodeCount(next) !== contentNodeCount(doc) - removed)
         throw shape('The node count did not shrink');
       if (next.nodes.has(node.id)) throw shape('The removed node is still present');
     },
@@ -490,7 +765,7 @@ function planOutdent(doc: Document, node: EditNode): Plan {
     ],
     selection: { kind: 'insert', edit: 1, offset: placed.leading + markerLength },
     verify(next, selection) {
-      if (next.nodes.size !== doc.nodes.size) throw shape('The node count changed');
+      if (contentNodeCount(next) !== contentNodeCount(doc)) throw shape('The node count changed');
       const found = nodeByLabelStart(next, selection);
       if (!found || found.parent !== grand.id)
         throw shape('The outdented node has the wrong parent');
@@ -647,24 +922,29 @@ function planMove(doc: Document, node: EditNode, parentId: string, index: number
   const following =
     gapEnd < doc.source.length || (gapEnd === doc.source.length && doc.source.endsWith(ending));
   const placed = placeBlock(text, ending, atLineStart, following);
+  const edits: Splice[] = [
+    { from: cut.start, to: cut.end, insert: '' },
+    gap > 0
+      ? { from: position, to: gapEnd, insert: placed.insert }
+      : { from: position, to: position, insert: placed.insert },
+  ];
   return {
-    edits: [
-      { from: cut.start, to: cut.end, insert: '' },
-      gap > 0
-        ? { from: position, to: gapEnd, insert: placed.insert }
-        : { from: position, to: position, insert: placed.insert },
-    ],
+    edits,
     selection: {
       kind: 'insert',
       edit: 1,
       offset: placed.leading + leading + firstLineMarker(moved),
     },
     verify(nextDoc, selection) {
-      if (nextDoc.nodes.size !== doc.nodes.size) throw shape('The move changed the node count');
-      const target = nextDoc.nodes.get(parent.id);
+      if (contentNodeCount(nextDoc) !== contentNodeCount(doc)) {
+        throw shape('The move changed the node count');
+      }
+      const target = parent.block
+        ? nodeByBlockStart(nextDoc, mapOffset(edits, parent.block.start))
+        : nextDoc.nodes.get(nextDoc.root);
       if (!target) throw shape('The target parent is missing');
       const found = nodeByLabelStart(nextDoc, selection);
-      if (!found || found.parent !== parent.id) throw shape('The moved node has the wrong parent');
+      if (!found || found.parent !== target.id) throw shape('The moved node has the wrong parent');
       if (target.children.indexOf(found.id) !== index) {
         throw shape('The moved node has the wrong order');
       }
@@ -690,7 +970,7 @@ function planToggleCheck(doc: Document, node: EditNode): Plan {
     edits: [{ from, to: from + 3, insert }],
     selection: { kind: 'source', offset: node.label.start },
     verify(next, selection) {
-      if (next.nodes.size !== doc.nodes.size) throw shape('The node count changed');
+      if (contentNodeCount(next) !== contentNodeCount(doc)) throw shape('The node count changed');
       const found = nodeByLabelStart(next, selection);
       if (!found || found.block?.start !== node.block?.start) throw shape('The task changed shape');
     },

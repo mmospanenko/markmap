@@ -6,6 +6,7 @@ import {
   dedentHeadings,
   dedentList,
   firstLineMarker,
+  headingsToList,
   insertLine,
   listLine,
   placeBlock,
@@ -59,6 +60,11 @@ describe('format', () => {
     expect(shiftHeadings('# A', 0, '\n')).toBe('# A');
     expect(() => shiftHeadings('# A', -1, '\n')).toThrowError(/below one/);
     expect(() => shiftHeadings('###### A', 1, '\n')).toThrowError(/exceed six/);
+  });
+
+  it('[TC-1-12-15] converts a heading block to list depth', () => {
+    expect(headingsToList('## B\n### C', '  ', '  ', '\n')).toBe('  - B\n    - C');
+    expect(headingsToList('# A\n# B', '', '  ', '\n')).toBe('- A\n# B');
   });
 
   it('[TC-1-11-7] inserts a block at a line boundary', () => {

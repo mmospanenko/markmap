@@ -1,4 +1,10 @@
-import { buildDocument, labelText, type Document, type EditNode } from '@markmap/model';
+import {
+  buildDocument,
+  contentNodeCount,
+  labelText,
+  type Document,
+  type EditNode,
+} from '@markmap/model';
 import { describe, expect, it } from 'vitest';
 import { applyCommand, EditError, type EditResult } from '.';
 import { listToHeadings } from './format';
@@ -148,11 +154,11 @@ describe('move', () => {
     expect(checked.document.source).toBe('# A\n\n## B\n\n## one\n\n## C\n');
   });
 
-  it('[TC-1-13-15] rejects an opaque target and a heading that cannot hold a child', () => {
+  it('[TC-1-13-15] rejects an opaque target and a heading that would exceed six levels', () => {
     const opaque = editError(() => move('- a\n\n- # T\n', 'a', 'T', 0));
     expect(opaque.code).toBe('E_CAPABILITY');
     const deep = editError(() => move('# A\n\n###### B\n\n## C\n', 'C', 'B', 0));
-    expect(deep.code).toBe('E_CAPABILITY');
+    expect(deep.code).toBe('E_LEVEL');
   });
 
   it('[TC-1-13-16] converts several top-level list items and rejects other text', () => {
@@ -178,5 +184,18 @@ describe('move', () => {
     const result = move('- a\n- b\n', 'b', '#root', 1);
     expect(result.edits).toEqual([]);
     expect(result.document.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-1-13-19] keeps the content node count when a move promotes a heading', () => {
+    const input = '## A\n\n## B\n\n### C\n';
+    const doc = buildDocument(input);
+    expect(contentNodeCount(doc)).toBe(3);
+    const result = move(input, 'A', 'B', 0);
+    expect(contentNodeCount(result.document)).toBe(3);
+    expect(result.document.nodes.size).toBe(3);
+    const root = result.document.nodes.get(result.document.root);
+    if (!root) throw new Error('No root');
+    expect(labelText(result.document, root)).toBe('B');
+    expect(result.document.source).toBe('## B\n\n### A\n\n### C\n');
   });
 });
