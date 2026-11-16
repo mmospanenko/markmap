@@ -2,7 +2,7 @@
 
 This branch is a fork of [Markmap](https://github.com/markmap/markmap) for [Markmap for OpenChamber](https://github.com/mmospanenko/openchamber-markmap), a file editor that renders and edits Markmap Markdown as a mind map in place.
 
-The upstream renderer, layout, view, toolbar, and themes stay unchanged. The fork adds an editing layer on top of the parsed tree:
+The upstream layout, view, toolbar, and built-in themes stay unchanged. The fork adds an editing layer and a soft render theme on top of the parsed tree:
 
 - `@markmap/model` projects the Markmap tree over its Markdown source, with label and block ranges.
 - `@markmap/edit` applies source-preserving label, sibling, child, move, delete, outdent, and checkbox commands.
