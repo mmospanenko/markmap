@@ -1,14 +1,7 @@
 import type { Anchor, LabelStyle, Point, Primitive, Theme } from '@markmap/core';
 import { validators } from '@markmap/core';
 import { type BranchColorOptions, branchColors, branchIndex, DEFAULT_COLORS } from './branch';
-import {
-  alignFor,
-  CODE_FONT,
-  CONTENT_TOKENS,
-  DARK_CONTENT_TOKENS,
-  sCurve,
-  SYSTEM_FONT,
-} from './shared';
+import { alignFor, CODE_FONT, CONTENT_TOKENS, DARK_CONTENT_TOKENS, SYSTEM_FONT } from './shared';
 
 const LIGHT_COLORS = ['#dc7768', '#9c6c9d', '#7369a1', '#cb9c40', '#77a76b', '#6c95bd'];
 
@@ -42,6 +35,7 @@ const BRANCH_EDGE_WIDTH = 1.5;
 const LEAF_UNDERLINE = 1.5;
 const TOGGLE_RADIUS = 6;
 const LEAF_BASELINE_INSET = 3;
+const CHILD_EDGE_CURVE = 0.75;
 
 const darkBranchTokens = Object.fromEntries(
   DARK_COLORS.map((color, index) => [`mm-branch-${index}`, color]),
@@ -103,6 +97,16 @@ function taperedCurve(from: Anchor, to: Point, startWidth: number, endWidth: num
     right.push(`${x - offsetX},${y - offsetY}`);
   }
   return `M${left.join('L')}L${right.reverse().join('L')}Z`;
+}
+
+function childCurve(from: Anchor, to: Point): string {
+  const vertical = from.side === 'top' || from.side === 'bottom';
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (vertical) {
+    return `M${from.x},${from.y}C${from.x},${from.y + dy * CHILD_EDGE_CURVE},${to.x},${to.y - dy * CHILD_EDGE_CURVE},${to.x},${to.y}`;
+  }
+  return `M${from.x},${from.y}C${from.x + dx * CHILD_EDGE_CURVE},${from.y},${to.x - dx * CHILD_EDGE_CURVE},${to.y},${to.x},${to.y}`;
 }
 
 export type SoftThemeOptions = BranchColorOptions;
@@ -265,7 +269,7 @@ export function createSoftTheme(options: SoftThemeOptions = {}): Theme {
           : [
               {
                 kind: 'path',
-                d: sCurve(from, to),
+                d: childCurve(from, to),
                 stroke: colorOf(ctx.node.path, ctx.node.branch),
                 strokeWidth: BRANCH_EDGE_WIDTH,
               },

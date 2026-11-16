@@ -1,4 +1,4 @@
-import type { Primitive, Theme } from '@markmap/core';
+import { oppositeSide, type Primitive, type Theme } from '@markmap/core';
 import { parse } from '@markmap/parse';
 import { describe, expect, it } from 'vitest';
 import { interpolateStates } from '../animate';
@@ -210,6 +210,15 @@ describe('soft theme', () => {
       strokeWidth: 1.5,
     });
     expect(childEdge?.kind === 'path' ? childEdge.fill : 'set').toBeUndefined();
+    const source = result.state.nodes.find((item) => item.node.id === child.parentId);
+    if (!source) throw new Error('Missing parent');
+    const from = softTheme.node.anchor(source.rect, child.ctx.direction, source.ctx);
+    const to = softTheme.node.anchor(child.rect, oppositeSide(child.ctx.direction), child.ctx);
+    expect(childEdge?.kind === 'path' ? childEdge.d : '').toBe(
+      `M${from.x},${from.y}C${from.x + (to.x - from.x) * 0.75},${from.y},${
+        to.x - (to.x - from.x) * 0.75
+      },${to.y},${to.x},${to.y}`,
+    );
   });
 
   it('[TC-4-4-1] provides dark tokens for every branch color and the tint', () => {
