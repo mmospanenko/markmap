@@ -10,6 +10,8 @@ import type { EditView, HistoryEntry, MarkmapEditorOptions } from './types';
 class FakeView implements EditView {
   element = document.createElement('div');
   scale = 1;
+  transform = { k: 1, x: 0, y: 0 };
+  pans: Array<[number, number]> = [];
   folded = new Set<string>();
   tree?: MarkmapNode;
   hit: { kind: string; nodeId?: string } | undefined;
@@ -23,8 +25,19 @@ class FakeView implements EditView {
     return this.folded;
   }
 
+  panBy(dx: number, dy: number): void {
+    this.pans.push([dx, dy]);
+  }
+
   setTree(root: MarkmapNode): void {
     this.tree = root;
+    const ids = new Set<string>();
+    const visit = (node: MarkmapNode): void => {
+      ids.add(node.id);
+      for (const child of node.children) visit(child);
+    };
+    visit(root);
+    this.folded = new Set([...this.folded].filter((id) => ids.has(id)));
     this.emit('render');
   }
 
@@ -132,6 +145,37 @@ function type(container: HTMLElement, value: string) {
   element.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function pointer(
+  target: EventTarget,
+  kind: string,
+  x: number,
+  y: number,
+  init: PointerEventInit = {},
+): boolean {
+  return target.dispatchEvent(
+    new PointerEvent(kind, {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      isPrimary: true,
+      ...init,
+    }),
+  );
+}
+
+function stack(view: FakeView, editor: MarkmapEditor): Map<string, Rect> {
+  const rects = new Map<string, Rect>();
+  editor.document.order.forEach((id, index) => {
+    rects.set(id, { x: 10, y: 10 + index * 60, width: 100, height: 30 });
+  });
+  for (const [id, rect] of rects) view.rects.set(id, rect);
+  return rects;
+}
+
 function treeLabel(node: MarkmapNode | undefined): string {
   if (!node) return '';
   return node.content.map((item) => ('value' in item ? item.value : '')).join('');
@@ -159,6 +203,11 @@ function setLayout(container: HTMLElement, width = 800, height = 600): void {
   container.getBoundingClientRect = () => new DOMRect(0, 0, width, height);
 }
 
+function dropElement(container: HTMLElement): HTMLElement | null {
+  const element = container.querySelector('.mm-editor-drop');
+  return element instanceof HTMLElement ? element : null;
+}
+
 function clickNotesButton(container: HTMLElement, name: string): void {
   const button = notesButton(container, name);
   button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
@@ -178,6 +227,8 @@ function openNotes(
 
 afterEach(() => {
   for (const editor of liveEditors.splice(0)) editor.destroy();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   document.body.replaceChildren();
 });
 
@@ -1430,7 +1481,13 @@ describe('createEditView', () => {
     const element = document.createElement('div');
     const mm = {
       element,
-      transform: { k: 2 },
+      transform: {
+        k: 2,
+        x: 5,
+        y: 6,
+        translate: (x: number, y: number) => ({ k: 2, x: 5 + x * 2, y: 6 + y * 2 }),
+      },
+      zoomBehavior: { transform: vi.fn<(selection: unknown, transform: unknown) => void>() },
       foldedIds: new Set<string>(),
       setTree: vi.fn<(root: MarkmapNode) => void>(),
       setFolded: vi.fn<(id: string, folded: boolean) => void>(),
@@ -1446,6 +1503,9 @@ describe('createEditView', () => {
     const view = createEditView(mm as unknown as Markmap);
     expect(view.element).toBe(element);
     expect(view.scale).toBe(2);
+    expect(view.transform).toEqual({ k: 2, x: 5, y: 6 });
+    view.panBy(10, 20);
+    expect(mm.zoomBehavior.transform).toHaveBeenCalled();
     expect(view.foldedIds).toBe(mm.foldedIds);
     expect(view.direction('a')).toBe('left');
     expect(view.direction('b')).toBeUndefined();
@@ -1611,5 +1671,644 @@ describe('History', () => {
     key(field(container), 'z', { metaKey: true, shiftKey: true });
     expect(editor.isEditing).toBe(false);
     expect(editor.source).toBe('- b\n');
+  });
+});
+
+describe('move', () => {
+  it('[TC-2-20-1] keeps a press below four pixels a click', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    const a = nodeId(editor, 'a');
+    view.hit = { kind: 'node', nodeId: a };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 62, 86);
+    pointer(window, 'pointerup', 62, 86);
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBe(a);
+  });
+
+  it('[TC-2-20-2] lifts a subtree after four pixels and drops it as a child', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    const a = nodeId(editor, 'a');
+    view.hit = { kind: 'node', nodeId: a };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).not.toBeNull();
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${a}"]`)
+        ?.classList.contains('mm-editor-drag-source'),
+    ).toBe(true);
+    expect(container.classList.contains('mm-editor-dragging')).toBe(true);
+
+    pointer(window, 'pointermove', 60, 145);
+    expect(dropElement(container)?.className).toContain('mm-editor-drop-frame');
+    expect(dropElement(container)?.style.display).toBe('block');
+
+    pointer(window, 'pointerup', 60, 145);
+
+    expect(editor.source).toBe('- b\n  - a\n');
+    expect(editor.selected).toBe(nodeId(editor, 'a'));
+    expect(changes).toHaveLength(1);
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+    expect(dropElement(container)?.style.display).toBe('none');
+  });
+
+  it('[TC-2-20-3] inserts before a target in its top quarter', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'c') };
+
+    pointer(container, 'pointerdown', 60, 205);
+    pointer(window, 'pointermove', 66, 205);
+    pointer(window, 'pointermove', 60, 133);
+    expect(dropElement(container)?.className).toContain('mm-editor-drop-line');
+    pointer(window, 'pointerup', 60, 133);
+
+    expect(editor.source).toBe('- a\n- c\n- b\n');
+  });
+
+  it('[TC-2-20-4] cancels a drag with Escape', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(container.classList.contains('mm-editor-dragging')).toBe(false);
+    expect(dropElement(container)?.style.display).toBe('none');
+  });
+
+  it('[TC-2-20-5] ignores a press on an invalid target', () => {
+    const { container, view, editor } = setup('- a\n  - b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+
+    expect(dropElement(container)?.style.display).not.toBe('block');
+    pointer(window, 'pointerup', 60, 145);
+    expect(editor.source).toBe('- a\n  - b\n- c\n');
+  });
+
+  it('[TC-2-20-6] expands a folded target after four hundred milliseconds', () => {
+    vi.useFakeTimers();
+    const { container, view, editor } = setup('- a\n- b\n  - d\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'b');
+    view.folded.add(b);
+    view.rects.set(nodeId(editor, 'd'), undefined);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    expect(view.folded.has(b)).toBe(true);
+
+    vi.advanceTimersByTime(400);
+    expect(view.folded.has(b)).toBe(false);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(view.folded.has(b)).toBe(true);
+    vi.runOnlyPendingTimers();
+  });
+
+  it('[TC-2-20-7] pans the map near the stage edge', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 790, 85);
+    expect(frames).toHaveLength(1);
+
+    const frame = frames[0];
+    if (frame) frame(0);
+    expect(view.pans).toHaveLength(1);
+    expect(view.pans[0]?.[0]).toBeLessThan(0);
+
+    pointer(window, 'pointerup', 790, 85);
+    raf.mockRestore();
+    caf.mockRestore();
+  });
+
+  it('[TC-2-20-8] ignores touch pointers', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85, { pointerType: 'touch' });
+    pointer(window, 'pointermove', 60, 145, { pointerType: 'touch' });
+    pointer(window, 'pointerup', 60, 145, { pointerType: 'touch' });
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-21-1] moves among siblings with Cmd/Ctrl+Shift+Up and Down', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- b\n- a\n- c\n');
+    key(container, 'ArrowDown', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n');
+  });
+
+  it('[TC-2-21-2] makes a node the last child of its previous sibling', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'c'));
+    key(container, 'ArrowLeft', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n  - c\n');
+  });
+
+  it('[TC-2-21-3] outdents a node after its parent', () => {
+    const { container, view, editor } = setup('- a\n  - b\n    - c\n');
+    clickNode(container, view, nodeId(editor, 'c'));
+    key(container, 'ArrowRight', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n  - b\n  - c\n');
+  });
+
+  it('[TC-2-21-4] leaves a boundary move unchanged', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    key(container, 'ArrowDown', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-21-5] undoes a keyboard move as one history entry', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- b\n- a\n');
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-20-9] targets the gap between two branches', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'c') };
+
+    pointer(container, 'pointerdown', 60, 205);
+    pointer(window, 'pointermove', 66, 205);
+    pointer(window, 'pointermove', 60, 115);
+    expect(dropElement(container)?.className).toContain('mm-editor-drop-line');
+    pointer(window, 'pointerup', 60, 115);
+
+    expect(editor.source).toBe('- a\n- c\n- b\n');
+  });
+
+  it('[TC-2-20-10] draws and drops sideways in an org chart', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    view.directions.set(nodeId(editor, 'a'), 'bottom');
+    view.directions.set(nodeId(editor, 'b'), 'bottom');
+    view.directions.set(nodeId(editor, 'c'), 'bottom');
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'c') };
+
+    pointer(container, 'pointerdown', 60, 205);
+    pointer(window, 'pointermove', 66, 205);
+    pointer(window, 'pointermove', 13, 145);
+    expect(dropElement(container)?.className).toContain('mm-editor-drop-line');
+    expect(dropElement(container)?.style.width).toBe('2px');
+    pointer(window, 'pointerup', 13, 145);
+
+    expect(editor.source).toBe('- a\n- c\n- b\n');
+  });
+
+  it('[TC-2-20-11] falls back to order when a target cannot hold a child', () => {
+    const { container, view, editor } = setup('# A\n\n###### B\n\n## C\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'B');
+    const c = nodeId(editor, 'C');
+    const rect = view.rects.get(b);
+    if (!rect) throw new Error('No rect');
+    view.directions.set(b, 'bottom');
+    view.directions.set(c, 'bottom');
+    view.hit = { kind: 'node', nodeId: c };
+
+    pointer(container, 'pointerdown', rect.x + 2, rect.y + rect.height / 2);
+    pointer(window, 'pointermove', rect.x + 8, rect.y + rect.height / 2);
+    pointer(window, 'pointermove', rect.x + 2, rect.y + rect.height / 2);
+    pointer(window, 'pointerup', rect.x + 2, rect.y + rect.height / 2);
+
+    expect(editor.source).not.toBe('# A\n\n###### B\n\n## C\n');
+    expect(editor.source.indexOf('## C')).toBeLessThan(editor.source.indexOf('###### B'));
+  });
+
+  it('[TC-2-20-12] drops on the root through a child slot', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    view.directions.set(nodeId(editor, 'a'), 'right');
+    view.directions.set(nodeId(editor, 'b'), 'right');
+    view.directions.set(nodeId(editor, 'c'), 'left');
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 20, 25);
+    pointer(window, 'pointerup', 20, 25);
+
+    expect(editor.source).toBe('- b\n- a\n- c\n');
+  });
+
+  it('[TC-2-20-13] pans in both axes and stops away from the edge', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 10, 10);
+    const first = frames[0];
+    if (first) first(0);
+    expect(view.pans[0]?.[0]).toBeGreaterThan(0);
+    expect(view.pans[0]?.[1]).toBeGreaterThan(0);
+    pointer(window, 'pointermove', 10, 10);
+
+    pointer(window, 'pointermove', 400, 300);
+    const second = frames[1];
+    if (second) second(0);
+    expect(view.pans).toHaveLength(1);
+
+    pointer(window, 'pointermove', 400, 595);
+    const third = frames[2];
+    if (third) third(0);
+    expect(view.pans).toHaveLength(2);
+    expect(view.pans[1]?.[1]).toBeLessThan(0);
+
+    pointer(window, 'pointerup', 400, 595);
+    const fourth = frames[3];
+    if (fourth) fourth(0);
+    expect(view.pans).toHaveLength(2);
+
+    raf.mockRestore();
+    caf.mockRestore();
+  });
+
+  it('[TC-2-20-14] clears a pending expand when the target changes', () => {
+    vi.useFakeTimers();
+    const { container, view, editor } = setup('- a\n- b\n  - d\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'b');
+    view.folded.add(b);
+    view.rects.set(nodeId(editor, 'd'), undefined);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    pointer(window, 'pointermove', 60, 205);
+    vi.advanceTimersByTime(400);
+
+    expect(view.folded.has(b)).toBe(true);
+    pointer(window, 'pointerup', 60, 205);
+    vi.runOnlyPendingTimers();
+  });
+
+  it('[TC-2-20-15] cancels a drag when the editor is destroyed', () => {
+    vi.useFakeTimers();
+    const { container, view, editor } = setup('- a\n- b\n  - d\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'b');
+    view.folded.add(b);
+    view.rects.set(nodeId(editor, 'd'), undefined);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    editor.destroy();
+    vi.advanceTimersByTime(400);
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+    expect(container.classList.contains('mm-editor-dragging')).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n  - d\n- c\n');
+    expect(view.folded.has(b)).toBe(true);
+    vi.runOnlyPendingTimers();
+  });
+
+  it('[TC-2-20-16] treats a drop in the current position as no change', () => {
+    const { container, view, editor } = setup('- p\n  - c\n- q\n');
+    setLayout(container);
+    stack(view, editor);
+    const p = nodeId(editor, 'p');
+    const c = nodeId(editor, 'c');
+    const rect = view.rects.get(p);
+    if (!rect) throw new Error('No rect');
+    view.hit = { kind: 'node', nodeId: c };
+
+    pointer(container, 'pointerdown', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointermove', rect.x + 56, rect.y + 18);
+    pointer(window, 'pointermove', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointerup', rect.x + 50, rect.y + 15);
+
+    expect(editor.source).toBe('- p\n  - c\n- q\n');
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-20-17] reports an impossible move and keeps the document', () => {
+    const { container, view, editor, errors } = setup('# A\n\n## B\n\n### C\n\n## D\n\n##### E\n');
+    setLayout(container);
+    stack(view, editor);
+    const e = nodeId(editor, 'E');
+    const rect = view.rects.get(e);
+    if (!rect) throw new Error('No rect');
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'B') };
+
+    pointer(container, 'pointerdown', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointermove', rect.x + 56, rect.y + 18);
+    pointer(window, 'pointermove', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointerup', rect.x + 50, rect.y + 15);
+
+    expect(errors).toHaveLength(1);
+    expect(editor.source).toBe('# A\n\n## B\n\n### C\n\n## D\n\n##### E\n');
+  });
+
+  it('[TC-2-20-18] cancels with a pointer cancel and ignores other keys', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    expect(container.classList.contains('mm-editor-dragging')).toBe(true);
+    pointer(window, 'pointercancel', 66, 90);
+
+    expect(container.classList.contains('mm-editor-dragging')).toBe(false);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-20-19] leaves a press inside the open field to the field', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    const a = nodeId(editor, 'a');
+    clickNode(container, view, a);
+    key(container, ' ');
+    const fieldElement = field(container);
+    const rect = view.rects.get(a);
+    if (!rect) throw new Error('No rect');
+
+    view.hit = { kind: 'node', nodeId: a };
+    pointer(fieldElement, 'pointerdown', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointermove', rect.x + 60, rect.y + 25);
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+  });
+
+  it('[TC-2-20-20] inserts after a target in its bottom quarter', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 157);
+    pointer(window, 'pointerup', 60, 157);
+
+    expect(editor.source).toBe('- b\n- a\n- c\n');
+  });
+
+  it('[TC-2-20-21] inserts after and as a child in an org chart', () => {
+    const after = setup('- a\n- b\n- c\n');
+    setLayout(after.container);
+    stack(after.view, after.editor);
+    for (const id of after.editor.document.order) after.view.directions.set(id, 'bottom');
+    after.view.hit = { kind: 'node', nodeId: nodeId(after.editor, 'a') };
+    pointer(after.container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 107, 145);
+    pointer(window, 'pointerup', 107, 145);
+    expect(after.editor.source).toBe('- b\n- a\n- c\n');
+
+    const child = setup('- a\n- b\n- c\n');
+    setLayout(child.container);
+    stack(child.view, child.editor);
+    for (const id of child.editor.document.order) child.view.directions.set(id, 'bottom');
+    child.view.hit = { kind: 'node', nodeId: nodeId(child.editor, 'a') };
+    pointer(child.container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    pointer(window, 'pointerup', 60, 145);
+    expect(child.editor.source).toBe('- b\n  - a\n- c\n');
+  });
+
+  it('[TC-2-20-22] leaves a child drop on a full heading unchanged', () => {
+    const { container, view, editor } = setup('# A\n\n###### B\n\n## C\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'B');
+    const c = nodeId(editor, 'C');
+    const rect = view.rects.get(b);
+    if (!rect) throw new Error('No rect');
+    view.directions.set(b, 'bottom');
+    view.directions.set(c, 'bottom');
+    view.hit = { kind: 'node', nodeId: c };
+
+    pointer(container, 'pointerdown', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointermove', rect.x + 56, rect.y + 18);
+    pointer(window, 'pointermove', rect.x + 50, rect.y + 15);
+    pointer(window, 'pointerup', rect.x + 50, rect.y + 15);
+
+    expect(editor.source).toBe('# A\n\n###### B\n\n## C\n');
+  });
+
+  it('[TC-2-20-23] ignores a root with no other child or no visible child', () => {
+    const single = setup('- a\n');
+    setLayout(single.container);
+    stack(single.view, single.editor);
+    single.view.hit = { kind: 'node', nodeId: nodeId(single.editor, 'a') };
+    pointer(single.container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 25);
+    pointer(window, 'pointerup', 60, 25);
+    expect(single.editor.source).toBe('- a\n');
+
+    const hidden = setup('- a\n- b\n');
+    setLayout(hidden.container);
+    stack(hidden.view, hidden.editor);
+    hidden.view.rects.set(nodeId(hidden.editor, 'b'), undefined);
+    hidden.view.hit = { kind: 'node', nodeId: nodeId(hidden.editor, 'a') };
+    pointer(hidden.container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 20, 25);
+    pointer(window, 'pointerup', 20, 25);
+    expect(hidden.editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-20-24] clears a pending expand when the drag ends early', () => {
+    vi.useFakeTimers();
+    const { container, view, editor } = setup('- a\n- b\n  - d\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'b');
+    view.folded.add(b);
+    view.rects.set(nodeId(editor, 'd'), undefined);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    vi.advanceTimersByTime(400);
+
+    expect(view.folded.has(b)).toBe(true);
+    vi.runOnlyPendingTimers();
+  });
+
+  it('[TC-2-20-25] ignores a press on the notes panel', () => {
+    const { container, view, editor } = setup('# A\n\n## B\n');
+    setLayout(container);
+    stack(view, editor);
+    clickNode(container, view, nodeId(editor, 'B'));
+    expect(editor.editNotes()).toBe(true);
+    const panel = notesPanel(container);
+    if (!panel) throw new Error('No notes panel');
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'B') };
+
+    pointer(panel, 'pointerdown', 20, 20);
+    pointer(window, 'pointermove', 30, 30);
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+  });
+
+  it('[TC-2-20-26] retargets after an automatic pan', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'b');
+    view.rects.set(b, { x: 800, y: 70, width: 100, height: 30 });
+    const pan = view.panBy.bind(view);
+    view.panBy = (dx, dy) => {
+      pan(dx, dy);
+      for (const [id, rect] of view.rects) {
+        if (rect) view.rects.set(id, { ...rect, x: rect.x + dx, y: rect.y + dy });
+      }
+    };
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 790, 85);
+    const frame = frames[0];
+    if (frame) frame(0);
+    expect(view.pans).toHaveLength(1);
+    expect(dropElement(container)?.className).toContain('mm-editor-drop-frame');
+
+    pointer(window, 'pointerup', 790, 85);
+    raf.mockRestore();
+    caf.mockRestore();
+  });
+
+  it('[TC-2-20-27] hides the indicator when a target disappears', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    const b = nodeId(editor, 'b');
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 145);
+    expect(dropElement(container)?.className).toContain('mm-editor-drop-frame');
+
+    view.rects.set(b, undefined);
+    view.emit('render');
+    expect(dropElement(container)?.style.display).toBe('none');
+
+    pointer(window, 'pointerup', 60, 145);
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-20-28] ignores a secondary pointer button', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85, { button: 2 });
+    pointer(window, 'pointermove', 66, 90);
+
+    expect(view.element.querySelector('.mm-editor-drag-ghost')).toBeNull();
+    expect(editor.source).toBe('- a\n- b\n');
+  });
+
+  it('[TC-2-20-29] restores folded branches when undoing a move', () => {
+    const { container, view, editor } = setup('- a\n  - b\n    - c\n- d\n');
+    setLayout(container);
+    stack(view, editor);
+    const oldB = nodeId(editor, 'b');
+    view.folded.add(oldB);
+    view.rects.set(nodeId(editor, 'c'), undefined);
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'a') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 265);
+    pointer(window, 'pointerup', 60, 265);
+
+    expect(editor.source).toBe('- d\n  - a\n    - b\n      - c\n');
+    expect(view.folded.has(oldB)).toBe(false);
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n  - b\n    - c\n- d\n');
+    expect(view.folded.has(oldB)).toBe(true);
+  });
+
+  it('[TC-2-21-6] ignores move keys on the root', () => {
+    const { container, view, editor } = setup('- a\n');
+    clickNode(container, view, editor.document.root);
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n');
   });
 });

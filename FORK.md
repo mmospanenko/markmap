@@ -5,8 +5,8 @@ This branch is a fork of [Markmap](https://github.com/markmap/markmap) for [Mark
 The upstream renderer, layout, view, toolbar, and themes stay unchanged. The fork adds an editing layer on top of the parsed tree:
 
 - `@markmap/model` projects the Markmap tree over its Markdown source, with label and block ranges.
-- `@markmap/edit` applies source-preserving label, sibling, child, delete, outdent, and checkbox commands.
-- `@markmap/edit-dom` adds selection, keyboard handling, the overlay label field, and undo/redo.
+- `@markmap/edit` applies source-preserving label, sibling, child, move, delete, outdent, and checkbox commands.
+- `@markmap/edit-dom` adds selection, keyboard handling, the overlay label field, pointer drag with a drop indicator, and undo/redo.
 - `@markmap/parse` and the `@markmap/core` types carry the source ranges the editor needs.
 
 The branch also supports an empty document, keeps a promoted heading root selected after a rename or undo, and uses a zero-width marker for empty nested labels.

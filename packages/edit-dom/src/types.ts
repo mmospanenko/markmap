@@ -4,7 +4,9 @@ import type { Document } from '@markmap/model';
 export interface EditView {
   readonly element: Element;
   readonly scale: number;
+  readonly transform: { k: number; x: number; y: number };
   readonly foldedIds: ReadonlySet<string>;
+  panBy(dx: number, dy: number): void;
   setTree(root: MarkmapNode): void;
   setFolded(id: string, folded: boolean): void;
   setFoldedIds(ids: Iterable<string>, options?: { animate?: boolean }): void;

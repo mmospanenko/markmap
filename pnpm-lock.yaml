@@ -301,6 +301,13 @@ importers:
       '@markmap/view':
         specifier: workspace:*
         version: link:../view
+      d3-selection:
+        specifier: ^3.0.1
+        version: 3.0.1
+    devDependencies:
+      '@types/d3-selection':
+        specifier: ^3.0.12
+        version: 3.0.12
 
   packages/element:
     dependencies:

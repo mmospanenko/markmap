@@ -27,6 +27,8 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-17] In selection mode, a printable key shall not start editing on a non-empty node; on an empty selected node, the first printable key shall open the field and be inserted. F2 shall not be bound, Space or a double click shall open the field, Escape shall keep the selection, and arrows shall navigate without folding. Enter while editing shall commit and return to selection without inserting a node; a following Enter in selection mode shall insert a sibling and open its field. The container shall expose `mm-editor-mode-select` and `mm-editor-mode-edit`.
 - [REQ-2-18] When the host requests a snapshot during editing, the editor shall include the current label and keep the field, focus and edit mode active so the user can continue typing after autosave.
 - [REQ-2-19] When the host asks the editor to insert a block, insert a label or delete the selection, the editor shall run the matching command, record one history entry, expose the new selection, and reject an unsupported operation without changing the document. It shall also return the selected node's Markdown block; for a root without a block, it shall return the frontmatter title as a level-one heading followed by every child block, without frontmatter.
+- [REQ-2-20] When a pointer presses a node and moves four pixels, the editor shall lift the node and its subtree into a ghost that follows the pointer, dim the original subtree, and keep the map layout until the drop. The top quarter of a target shall insert before it, the bottom quarter after it, and the middle shall make the branch the last child; a gap between branches shall target that gap. One indicator shall show at a time: a two-pixel accent line for order and a rounded accent frame for a child drop. The node itself, its descendants, the root, an opaque node and an unsupported target shall show no indicator, and the release shall snap back. A folded target shall expand after four hundred milliseconds, and a cancelled drag shall restore the fold. Within sixty pixels of the stage edge the map shall pan automatically. Escape, a pointer cancel or a release over empty space shall cancel. After a drop the moved node shall stay selected and in view. A move shall be one history entry, and undo shall restore the exact bytes and the fold state. A read-only map shall have no drag. Touch pointers shall stay with the view gestures.
+- [REQ-2-21] When the user presses Cmd or Ctrl+Shift+Up or Down, the editor shall move the selected node among its siblings; Left shall make it the last child of the previous sibling; Right shall move it after its parent. The pointer path's command, notices, history and level changes shall apply. A boundary move shall change nothing, an impossible move shall show a notice and leave the document unchanged, and a read-only map shall have no move keys.
 
 ## Acceptance tests
 
@@ -51,6 +53,8 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-17    | TC-2-17-1 ... TC-2-17-8  |
 | REQ-2-18    | TC-2-18-1, TC-2-18-2     |
 | REQ-2-19    | TC-2-19-1 ... TC-2-19-4  |
+| REQ-2-20    | TC-2-20-1 ... TC-2-20-8  |
+| REQ-2-21    | TC-2-21-1 ... TC-2-21-5  |
 
 ## Decisions
 
@@ -59,8 +63,13 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - Enter while editing commits the label and inserts the next sibling, matching XMind fast entry. Tab does the same with a child.
 - Shift+Enter is allowed only for list labels. A heading label stays on one line.
 - Block insertion is a model command. Clipboard detection, the transfer format, and the paste notice stay in the app.
+- The drag ghost clones the moved node and its subtree, including internal edges, and leaves the original in place, dimmed.
+- The root and a title root are targets only through an insertion line between their children, never through a child frame.
+- A heading child gets one blank line before it when the destination has headings. A list child stays compact.
+- A list item converted to a heading loses a GFM task checkbox because a heading is not a task; its label text stays.
+- Touch pointers stay with the view gestures. The drag layer handles a mouse or pen pointer.
 
 ## Out of scope
 
-- Drag and drop, multi-select, clipboard detection, and a WYSIWYG inline editor.
-- Saving fold state to Markdown.
+- Touch drag, multi-select, clipboard detection, and a WYSIWYG inline editor.
+- A topic created by dropping on empty space, free coordinates, and saving fold state to Markdown.

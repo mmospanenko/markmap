@@ -8,7 +8,7 @@ English is the repository language for code, tests, docs and commits. Chat repli
 
 - `packages/model` (`@markmap/model`): parse a document, build an immutable editable snapshot with source ranges, validate it, expose node capabilities and return the render tree.
 - `packages/edit` (`@markmap/edit`): turn a command into non-overlapping splices, apply them, parse the result, validate it, check the shape and return the next snapshot, render tree and selection offset.
-- `packages/edit-dom` (`@markmap/edit-dom`): selection, keyboard, overlay field, undo and fold preservation over a live `Markmap` view.
+- `packages/edit-dom` (`@markmap/edit-dom`): selection, keyboard, pointer drag with a drop indicator, overlay field, undo and fold preservation over a live `Markmap` view.
 - `packages/core` and `packages/parse` carry only the source ranges needed by the model.
 
 ## Commands
@@ -63,6 +63,7 @@ Markdown -> @markmap/parse (remark) -> MarkmapNode tree with source ranges
 - Keep the overlay field outside the SVG. Position it from `screenRect`, hide the node text with a class and replay classes after every render.
 - Markmap does not parse an empty nested list item. New nodes use the placeholder label and select it for typing.
 - The view is read-only: never patch `@markmap/view` for editor behavior. Use the `EditView` contract.
+- A node drag lifts a clone of the subtree, shows one insertion line or one child frame, and applies a single `move` command on drop. The pointer layer owns no layout and writes no Markdown itself.
 
 ## Workflow
 

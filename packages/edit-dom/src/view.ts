@@ -1,4 +1,5 @@
 import type { Markmap } from '@markmap/view';
+import { select } from 'd3-selection';
 import type { EditView } from './types';
 
 export function createEditView(mm: Markmap): EditView {
@@ -6,6 +7,13 @@ export function createEditView(mm: Markmap): EditView {
     element: mm.element,
     get scale() {
       return mm.transform.k;
+    },
+    get transform() {
+      return { k: mm.transform.k, x: mm.transform.x, y: mm.transform.y };
+    },
+    panBy: (dx, dy) => {
+      const { k } = mm.transform;
+      mm.zoomBehavior.transform(select(mm.element), mm.transform.translate(dx / k, dy / k));
     },
     get foldedIds() {
       return mm.foldedIds;
