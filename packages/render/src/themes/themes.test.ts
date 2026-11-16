@@ -8,6 +8,7 @@ import { approximateMeasurer } from '../measure';
 import { builtinThemes, resolveRenderOptions } from '../options';
 import { drawState, renderTree } from '../render';
 import { themeCSS, toSVGString } from '../svg';
+import { branchIndex } from './branch';
 import { cardsTheme } from './cards';
 import { classicTheme } from './classic';
 import { minimalTheme } from './minimal';
@@ -167,6 +168,15 @@ describe('soft theme', () => {
     });
     expect(leafChrome[0]).toMatchObject({ kind: 'path', strokeWidth: 1.5 });
     expect(leafChrome[0].kind === 'path' ? leafChrome[0].fill : 'set').toBeUndefined();
+
+    const empty = renderTree(parse('').root, {
+      measurer: approximateMeasurer,
+      theme: softTheme,
+    });
+    const emptyRoot = empty.state.nodes[0];
+    expect(
+      emptyRoot && chromeOf(empty, emptyRoot.node.id).filter((item) => item.kind !== 'group'),
+    ).toEqual([]);
   });
 
   it('[TC-4-2-1] gives each first-level branch one inherited color', () => {
@@ -208,11 +218,26 @@ describe('soft theme', () => {
     }
     expect(softTheme.darkTokens?.['mm-branch-0']).not.toBe(softTheme.tokens['mm-branch-0']);
     expect(softTheme.darkTokens?.['mm-soft-tint']).not.toBe(softTheme.tokens['mm-soft-tint']);
+    expect(softTheme.darkTokens?.['mm-soft-root-bg']).not.toBe(softTheme.tokens['mm-soft-root-bg']);
+    expect(softTheme.darkTokens?.['mm-soft-toggle']).not.toBe(softTheme.tokens['mm-soft-toggle']);
   });
 
   it('[TC-4-2-2] keeps color and colorDepth options on the configured theme', () => {
     const themed = createSoftTheme({ color: ['#112233'], colorDepth: 0 });
     expect(themed.tokens['mm-branch-0']).toBe('#112233');
+
+    const rootOnly = renderTree(parse(md).root, {
+      measurer: approximateMeasurer,
+      theme: createSoftTheme({ colorDepth: 1 }),
+    });
+    const rootColor = `var(--mm-branch-${branchIndex(
+      rootOnly.contexts.get(rootOnly.layout.nodes[0]?.node.id ?? '')?.path ?? [],
+      6,
+      1,
+    )})`;
+    const topics = rootOnly.state.nodes.filter((item) => item.ctx.depth === 1);
+    expect(colorOfEdge(edgeOf(rootOnly, topics[0]?.node.id ?? ''))).toBe(rootColor);
+    expect(colorOfEdge(edgeOf(rootOnly, topics[1]?.node.id ?? ''))).toBe(rootColor);
 
     const { options, warnings } = resolveRenderOptions({}, { theme: 'soft' });
     expect(options.theme?.name).toBe('soft');

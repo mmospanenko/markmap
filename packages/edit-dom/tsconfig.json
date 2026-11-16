@@ -11,6 +11,7 @@
     { "path": "../parse" },
     { "path": "../model" },
     { "path": "../edit" },
+    { "path": "../render" },
     { "path": "../view" }
   ]
 }

@@ -152,7 +152,8 @@ export function createSoftTheme(options: SoftThemeOptions = {}): Theme {
     node: {
       padding: [...LEAF_PADDING],
       textAlign: (ctx) => (ctx.depth <= 1 ? 'center' : alignFor(ctx.direction)),
-      render(_node, box, ctx) {
+      render(node, box, ctx) {
+        if (ctx.depth === 0 && node.content.length === 0) return [];
         const color = colorOf(ctx.path, ctx.branch);
         const toggle = ctx.depth === 0 ? 'var(--mm-soft-toggle)' : color;
         const chrome: Primitive[] = [];
