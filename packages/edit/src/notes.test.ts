@@ -94,11 +94,14 @@ describe('setNotes', () => {
   });
 
   it('[TC-3-4-2] inserts a fence before the first child of a title root', () => {
-    const input = '---\ntitle: T\n---\n\n## B\n';
+    const input = '---\ntitle: T\n---\n\n## B\n\n## C\n';
     const result = note('root', input, 'note');
-    expect(result.document.source).toBe('---\ntitle: T\n---\n\n```markmap-note\nnote\n```\n## B\n');
-    expect(result.document.nodes.get(result.document.root)?.children).toHaveLength(1);
+    expect(result.document.source).toBe(
+      '---\ntitle: T\n---\n\n```markmap-note\nnote\n```\n## B\n\n## C\n',
+    );
+    expect(result.document.nodes.get(result.document.root)?.children).toHaveLength(2);
     expect(labelText(result.document, find(result.document, 'B'))).toBe('B');
+    expect(labelText(result.document, find(result.document, 'C'))).toBe('C');
   });
 
   it('[TC-3-4-3] produces no splices for unchanged text', () => {
@@ -149,5 +152,53 @@ describe('setNotes', () => {
     const result = note('root', input, '');
     expect(result.document.source).toBe('---\ntitle: T\n---\n\n## B\n');
     expect(result.document.nodes.get(result.document.root)?.notes).toEqual([]);
+  });
+
+  it('[TC-3-4-9] replaces and removes legacy intro notes on promoted roots', () => {
+    for (const marker of ['#', '##']) {
+      const input = `Intro.\n\n${marker} A\n\n- x\n`;
+      const replaced = note('root', input, 'All');
+      expect(replaced.document.source).toBe(
+        `${marker} A\n\`\`\`markmap-note\nAll\n\`\`\`\n\n- x\n`,
+      );
+      const replacedRoot = replaced.document.nodes.get(replaced.document.root);
+      if (!replacedRoot) throw new Error('No root');
+      expect(replaced.document.order[0]).toBe(replaced.document.root);
+      expect(labelText(replaced.document, replacedRoot)).toBe('A');
+      expect(replacedRoot.block?.start).toBe(0);
+      expect(
+        replacedRoot.children.map((id) => {
+          const child = replaced.document.nodes.get(id);
+          return child ? labelText(replaced.document, child) : '';
+        }),
+      ).toEqual(['x']);
+
+      const removed = note('root', input, '');
+      expect(removed.document.source).toBe(`${marker} A\n\n- x\n`);
+      const after = removed.document.nodes.get(removed.document.root);
+      if (!after) throw new Error('No root');
+      expect(labelText(removed.document, after)).toBe('A');
+      expect(after.block?.start).toBe(0);
+    }
+  });
+
+  it('[TC-3-4-10] replaces and removes fenced intro notes on promoted roots', () => {
+    for (const marker of ['#', '##']) {
+      const input = `\`\`\`markmap-note\nIntro.\n\`\`\`\n\n${marker} A\n\n- x\n`;
+      const replaced = note('root', input, 'All');
+      expect(replaced.document.source).toBe(
+        `${marker} A\n\`\`\`markmap-note\nAll\n\`\`\`\n\n- x\n`,
+      );
+      const replacedRoot = replaced.document.nodes.get(replaced.document.root);
+      if (!replacedRoot) throw new Error('No root');
+      expect(labelText(replaced.document, replacedRoot)).toBe('A');
+      expect(replacedRoot.block?.start).toBe(0);
+      const removed = note('root', input, '');
+      expect(removed.document.source).toBe(`${marker} A\n\n- x\n`);
+      const after = removed.document.nodes.get(removed.document.root);
+      if (!after) throw new Error('No root');
+      expect(labelText(removed.document, after)).toBe('A');
+      expect(after.block?.start).toBe(0);
+    }
   });
 });

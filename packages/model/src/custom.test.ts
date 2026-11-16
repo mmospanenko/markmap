@@ -25,11 +25,14 @@ function tree(children: MarkmapNode[]): MarkmapNode {
   };
 }
 
+const meta = { hasTitle: false, bodyStart: 0 };
+
 describe('custom trees', () => {
   it('[TC-1-2-17] marks an unknown node type opaque', () => {
     const doc = buildFromTree(
       '# A',
       tree([node({ id: 'x', source: { block: { start: 0, end: 3 } } })]),
+      meta,
     );
     const custom = doc.nodes.get('x')!;
     expect(custom.kind).toBe('opaque');
@@ -49,6 +52,7 @@ describe('custom trees', () => {
           source: { block: { start: 0, end: 3 } },
         }),
       ]),
+      meta,
     );
     const item = doc.nodes.get('x')!;
     expect(item.kind).toBe('listItem');
@@ -60,10 +64,11 @@ describe('custom trees', () => {
     const wrong = buildFromTree(
       '- a',
       tree([node({ id: 'x', type: 'heading', source: { block: { start: 0, end: 3 } } })]),
+      meta,
     );
     expect(wrong.nodes.get('x')!.opaque).toBe(true);
 
-    const missing = buildFromTree('- a', tree([node({ id: 'x', type: 'heading' })]));
+    const missing = buildFromTree('- a', tree([node({ id: 'x', type: 'heading' })]), meta);
     expect(missing.nodes.get('x')!.opaque).toBe(true);
   });
 
@@ -71,6 +76,7 @@ describe('custom trees', () => {
     const doc = buildFromTree(
       '# A',
       tree([node({ id: 'x', type: 'heading', data: { depth: 7 } })]),
+      meta,
     );
     expect(doc.nodes.get('x')!.level).toBe(7);
     expect(doc.nodes.get('x')!.opaque).toBe(true);
@@ -93,6 +99,7 @@ describe('custom trees', () => {
           ],
         }),
       ]),
+      meta,
     );
     expect(doc.unit).toBe('  ');
     expect(indentColumns(doc.nodes.get(doc.root)!)).toBe(0);

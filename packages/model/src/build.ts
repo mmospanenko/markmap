@@ -4,11 +4,14 @@ import { firstLine, HEADING_MARKER, indentWidth, lineStart, LIST_MARKER } from '
 import type {
   Capabilities,
   Document,
+  DocumentMeta,
   EditNode,
   ListInfo,
   NodeKind,
   NoteRange,
   Range,
+  RootKind,
+  RootPolicy,
 } from './types';
 
 export interface ParseDocumentResult {
@@ -18,15 +21,23 @@ export interface ParseDocumentResult {
 }
 
 export function parseDocument(source: string): ParseDocumentResult {
-  const { root, frontmatter } = parse(source);
-  return { document: buildFromTree(source, root), tree: root, frontmatter };
+  const { root, frontmatter, hasTitle, bodyStart } = parse(source);
+  return {
+    document: buildFromTree(source, root, { hasTitle, bodyStart }),
+    tree: root,
+    frontmatter,
+  };
 }
 
 export function buildDocument(source: string): Document {
   return parseDocument(source).document;
 }
 
-export function buildFromTree(source: string, root: MarkmapNode): Document {
+export function contentNodeCount(doc: Document): number {
+  return doc.nodes.size - (doc.rootPolicy.kind === 'source-heading' ? 0 : 1);
+}
+
+export function buildFromTree(source: string, root: MarkmapNode, meta: DocumentMeta): Document {
   const nodes = new Map<string, EditNode>();
   const order: string[] = [];
 
@@ -39,7 +50,25 @@ export function buildFromTree(source: string, root: MarkmapNode): Document {
 
   visit(root, null);
   const unit = detectUnit(nodes, order);
-  return { source, root: root.id, nodes, order, unit };
+  const rootNode = nodes.get(root.id);
+  const hasTitle = meta.hasTitle;
+  const bodyStart = Math.max(0, Math.min(meta.bodyStart, source.length));
+  const kind: RootKind = rootNode?.block ? 'source-heading' : hasTitle ? 'title' : 'synthetic';
+  const headingChild = rootNode?.children.some((id) => nodes.get(id)?.kind === 'heading') ?? false;
+  const topH1 =
+    rootNode?.children.some((id) => {
+      const child = nodes.get(id);
+      return child?.kind === 'heading' && child.level === 1;
+    }) ?? false;
+  const canCreateHeading = kind === 'synthetic' ? !topH1 : kind === 'title' ? !headingChild : false;
+  const rootPolicy: RootPolicy = {
+    kind,
+    hasTitle,
+    bodyStart,
+    hasHeadingChild: headingChild,
+    canCreateHeading,
+  };
+  return { source, root: root.id, nodes, order, unit, rootPolicy };
 }
 
 function buildNode(source: string, tree: MarkmapNode, parent: EditNode | null): EditNode {
@@ -167,7 +196,7 @@ function readCapabilities(
       ...base,
       editLabel: Boolean(node.label && node.block),
       editNotes: true,
-      addChild: node.level < 6,
+      addChild: true,
       addSibling: Boolean(parent),
       outdent: parent?.kind === 'heading',
       delete: Boolean(parent),

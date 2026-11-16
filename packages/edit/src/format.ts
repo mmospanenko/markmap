@@ -42,7 +42,10 @@ export function blockInsertion(
   block: string,
   ending: string,
 ): InsertedLine {
-  const atLineStart = position === 0 || source[position - 1] === '\n';
+  const atLineStart =
+    position === 0 ||
+    source[position - 1] === '\n' ||
+    (position === 1 && source.startsWith('\uFEFF'));
   const prefix = atLineStart ? '' : ending;
   const hasNewline = block.endsWith('\n') || block.endsWith('\r\n');
   const newlineAfter = newlineLengthAt(source, position) > 0;
@@ -63,7 +66,10 @@ export function insertLine(
   line: string,
   ending: string,
 ): InsertedLine {
-  const atLineStart = position === 0 || source[position - 1] === '\n';
+  const atLineStart =
+    position === 0 ||
+    source[position - 1] === '\n' ||
+    (position === 1 && source.startsWith('\uFEFF'));
   if (atLineStart) {
     const suffix = position < source.length || source.endsWith('\n') ? ending : '';
     return { insert: line + suffix, leading: 0 };

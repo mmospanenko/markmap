@@ -1,6 +1,6 @@
 import type { MarkmapNode, Note } from '@markmap/core';
 import { describe, expect, it } from 'vitest';
-import { buildDocument, buildFromTree, labelText } from '.';
+import { buildDocument, buildFromTree, labelText, noteText, notesText, normalizeNoteText } from '.';
 import type { Document, EditNode } from '.';
 
 function find(doc: Document, text: string): EditNode {
@@ -27,7 +27,7 @@ describe('model notes', () => {
       data: {},
       children: [],
     };
-    const doc = buildFromTree('abc', tree);
+    const doc = buildFromTree('abc', tree, { hasTitle: false, bodyStart: 0 });
     const root = doc.nodes.get(doc.root);
     expect(root?.notes).toEqual([{ range: { start: 2, end: 3 }, fence: true }]);
   });
@@ -58,5 +58,40 @@ describe('model notes', () => {
     expect(find(buildDocument('- a\n'), 'a').capabilities.editNotes).toBe(true);
     expect(empty.nodes.get(empty.root)?.capabilities.editNotes).toBe(false);
     expect(find(opaque, 'T').capabilities.editNotes).toBe(false);
+  });
+
+  it('[TC-3-2-4] keeps per-note partitions distinct when joined text collides', () => {
+    const source = 'A\n\nB\n\nC';
+    const doc = buildDocument(source);
+    const root = doc.nodes.get(doc.root);
+    if (!root) throw new Error('No root');
+    const first = noteText(doc, root, { range: { start: 0, end: 4 }, fence: false });
+    const second = noteText(doc, root, { range: { start: 6, end: 7 }, fence: false });
+    const otherFirst = noteText(doc, root, { range: { start: 0, end: 1 }, fence: false });
+    const otherSecond = noteText(doc, root, { range: { start: 3, end: 7 }, fence: false });
+    expect([first, second]).toEqual(['A\n\nB', 'C']);
+    expect([otherFirst, otherSecond]).toEqual(['A', 'B\n\nC']);
+    expect([first, second].join('\n\n')).toBe([otherFirst, otherSecond].join('\n\n'));
+  });
+
+  it('[TC-3-2-5] de-indents one fenced note and composes notesText', () => {
+    const doc = buildDocument('- a\n\n  ```markmap-note\n  first\n    second\n  ```\n');
+    const node = find(doc, 'a');
+    const note = node.notes[0];
+    if (!note) throw new Error('No note');
+    expect(noteText(doc, node, note)).toBe('first\n  second');
+    expect(notesText(doc, node)).toBe('first\n  second');
+  });
+
+  it('[TC-3-2-6] keeps the old notesText join before one final normalize', () => {
+    const doc = buildDocument('# A\n\n```markmap-note\nOne\n\n```\n\nTwo\n');
+    const node = find(doc, 'A');
+    const [fence, paragraph] = node.notes;
+    if (!fence || !paragraph) throw new Error('No notes');
+    expect(noteText(doc, node, fence)).toBe('One\n');
+    expect(noteText(doc, node, paragraph)).toBe('Two');
+    expect(notesText(doc, node)).toBe('One\n\n\nTwo');
+    expect(normalizeNoteText(noteText(doc, node, fence))).toBe('One');
+    expect(normalizeNoteText(noteText(doc, node, paragraph))).toBe('Two');
   });
 });

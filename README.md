@@ -15,7 +15,7 @@ Turn Markdown into interactive mind maps.
 - See the sights
 ```
 
-Headings and list items become branches you can fold, zoom and pan. Other text, such as paragraphs and code, stays with its branch as a note that opens in a popover.
+Headings and list items become branches you can fold, zoom and pan. Other text, such as paragraphs and code, stays with its branch as a note that opens in a popover. When the only top-level node is a heading at H1-H6, it becomes the root even when frontmatter has a `title`; a leading list prevents promotion. The title supplies the root only when no promotion happens.
 
 ## Fork additions
 

@@ -28,7 +28,7 @@ The editor:
 
 - The renderer stays untouched and the editor is testable with a fake view in happy-dom.
 - Typing changes only the preview tree. The document changes on commit, and cancelling restores the original tree and folds.
-- A host snapshot commits the preview into the source while leaving the field, focus and edit mode active.
+- A label snapshot is a pure read of the current saveable draft; it does not commit or change history. A notes snapshot still commits the notes into the source while leaving the panel, focus and edit mode active. Drafts reach the host through `onDraftChange`, and `onChange` stays the committed-document channel.
 - The host gives the container a size and, when needed, the editor sets `position: relative` and restores it on destroy.
 - The field styling is approximate: it inherits the host font and uses a small default padding. A host can override the field class.
 - Empty nested list items are not parsed by Markmap. The editor inserts a placeholder label instead.

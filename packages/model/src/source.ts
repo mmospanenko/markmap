@@ -1,8 +1,9 @@
-import type { Document, EditNode } from './types';
+import type { Document, EditNode, NoteRange } from './types';
 
 export function lineStart(source: string, offset: number): number {
   const index = source.lastIndexOf('\n', offset - 1);
-  return index === -1 ? 0 : index + 1;
+  const start = index === -1 ? 0 : index + 1;
+  return start === 0 && offset > 0 && source.startsWith('\uFEFF') ? 1 : start;
 }
 
 export function lineEnd(source: string, offset: number): number {
@@ -25,7 +26,7 @@ export function indentWidth(indent: string): number {
 }
 
 export const LIST_MARKER = /^([ \t]*)([-+*]|\d{1,9}[.)])(?:[ \t]+|$)(\[[ xX]\][ \t]+)?/;
-export const HEADING_MARKER = /^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)/;
+export const HEADING_MARKER = /^[ \t]{0,3}(#{1,6})(?:[ \t]+|(?=\r?$))/;
 
 export function contentIndent(node: EditNode): string {
   if (node.kind !== 'listItem' || !node.list) return '';
@@ -41,18 +42,19 @@ export function normalizeNoteText(text: string): string {
     .replace(/\n+$/u, '');
 }
 
-export function notesText(doc: Document, node: EditNode): string {
+export function noteText(doc: Document, node: EditNode, note: NoteRange): string {
   const indent = contentIndent(node);
+  const raw = doc.source.slice(note.range.start, note.range.end);
+  if (!note.fence) return raw;
+  return raw
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .slice(1, -1)
+    .map((line) => (indent && line.startsWith(indent) ? line.slice(indent.length) : line))
+    .join('\n');
+}
+
+export function notesText(doc: Document, node: EditNode): string {
   const notes = [...node.notes].toSorted((a, b) => a.range.start - b.range.start);
-  const parts = notes.map((note) => {
-    const raw = doc.source.slice(note.range.start, note.range.end);
-    if (!note.fence) return raw;
-    return raw
-      .replace(/\r\n?/g, '\n')
-      .split('\n')
-      .slice(1, -1)
-      .map((line) => (indent && line.startsWith(indent) ? line.slice(indent.length) : line))
-      .join('\n');
-  });
-  return normalizeNoteText(parts.join('\n\n'));
+  return normalizeNoteText(notes.map((note) => noteText(doc, node, note)).join('\n\n'));
 }

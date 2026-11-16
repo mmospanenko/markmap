@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDocument,
+  contentNodeCount,
   indentColumns,
   labelText,
   nodeAtOffset,
@@ -57,6 +58,14 @@ describe('model', () => {
     expect(root.capabilities.addChild).toBe(true);
     expect(root.capabilities.addSibling).toBe(false);
     expect(root.capabilities.delete).toBe(false);
+  });
+
+  it('[TC-1-2-23] keeps an H6 heading extensible through the list fallback', () => {
+    const doc = buildDocument('# A\n\n###### F\n');
+    const deep = find(doc, 'F');
+    expect(deep.level).toBe(6);
+    expect(deep.capabilities.addChild).toBe(true);
+    expect(deep.capabilities.addSibling).toBe(true);
   });
 
   it('[TC-1-2-3] detects a four-space indent unit and tabs', () => {
@@ -130,6 +139,111 @@ describe('model', () => {
     const nesting = buildDocument('# A\n\n## B\n');
     find(nesting, 'B').level = 1;
     expect(validateDocument(nesting).map((issue) => issue.code)).toContain('E_LEVEL');
+  });
+
+  it('[TC-1-14-3] keeps an empty ATX source root editable', () => {
+    const doc = buildDocument('##');
+    const root = doc.nodes.get(doc.root)!;
+    expect(root.kind).toBe('root');
+    expect(root.level).toBe(2);
+    expect(root.label).toEqual({ start: 2, end: 2 });
+    expect(root.opaque).toBe(false);
+    expect(root.capabilities.editLabel).toBe(true);
+    expect(labelText(doc, root)).toBe('');
+  });
+
+  it('[TC-1-14-6] keeps BOM block and note ranges in the model', () => {
+    const input = '\uFEFF# A\n\nNote.\n';
+    const doc = buildDocument(input);
+    const root = doc.nodes.get(doc.root)!;
+    expect(root.block).toEqual({ start: 1, end: input.length });
+    expect(root.notes).toHaveLength(1);
+    const range = root.notes[0]?.range;
+    if (!range) throw new Error('No note range');
+    expect(doc.source.slice(range.start, range.end)).toBe('Note.');
+    expect(labelText(doc, root)).toBe('A');
+  });
+
+  it('[TC-1-15-1] classifies root sources and creation eligibility', () => {
+    const sourceHeading = buildDocument('# A\n');
+    expect(sourceHeading.rootPolicy).toEqual({
+      kind: 'source-heading',
+      hasTitle: false,
+      bodyStart: 0,
+      hasHeadingChild: false,
+      canCreateHeading: false,
+    });
+
+    const title = buildDocument('---\ntitle: T\n---\n\n- a\n');
+    expect(title.rootPolicy.kind).toBe('title');
+    expect(title.rootPolicy.hasTitle).toBe(true);
+    expect(title.rootPolicy.hasHeadingChild).toBe(false);
+    expect(title.rootPolicy.canCreateHeading).toBe(true);
+
+    const synthetic = buildDocument('- a\n');
+    expect(synthetic.rootPolicy.kind).toBe('synthetic');
+    expect(synthetic.rootPolicy.hasTitle).toBe(false);
+    expect(synthetic.rootPolicy.canCreateHeading).toBe(true);
+
+    const h1 = buildDocument('# A\n# B\n');
+    expect(h1.rootPolicy.kind).toBe('synthetic');
+    expect(h1.rootPolicy.canCreateHeading).toBe(false);
+
+    const front = buildDocument('---\nfoo: 1\n---\n# A\n');
+    expect(front.rootPolicy.kind).toBe('source-heading');
+    expect(front.rootPolicy.bodyStart).toBe(front.source.indexOf('# A'));
+
+    const empty = buildDocument('');
+    expect(empty.rootPolicy.canCreateHeading).toBe(true);
+    expect(empty.rootPolicy.bodyStart).toBe(0);
+
+    const root = front.nodes.get(front.root)!;
+    for (const capability of ['addSibling', 'outdent', 'delete', 'move'] as const) {
+      expect(root.capabilities[capability]).toBe(false);
+    }
+  });
+
+  it('[TC-1-15-2] keeps a Setext root label-editable and structurally opaque', () => {
+    const doc = buildDocument('Title\n=====\n');
+    const root = doc.nodes.get(doc.root)!;
+    expect(doc.rootPolicy.kind).toBe('source-heading');
+    expect(root.level).toBe(1);
+    expect(root.opaque).toBe(true);
+    expect(root.capabilities.editLabel).toBe(true);
+    expect(root.capabilities.addChild).toBe(false);
+    expect(root.capabilities.delete).toBe(false);
+  });
+
+  it('[TC-1-15-16] classifies title roots and their heading eligibility', () => {
+    for (const marker of ['#', '##', '######']) {
+      const single = buildDocument(`---\ntitle: T\n---\n\n${marker} A\n`);
+      expect(single.rootPolicy.kind).toBe('source-heading');
+      expect(single.rootPolicy.hasTitle).toBe(true);
+      expect(single.rootPolicy.canCreateHeading).toBe(false);
+      expect(labelText(single, single.nodes.get(single.root)!)).toBe('A');
+    }
+
+    const list = buildDocument('---\ntitle: T\n---\n\n- a\n');
+    expect(list.rootPolicy.kind).toBe('title');
+    expect(list.rootPolicy.hasHeadingChild).toBe(false);
+    expect(list.rootPolicy.canCreateHeading).toBe(true);
+
+    const two = buildDocument('---\ntitle: T\n---\n\n## A\n\n## B\n');
+    expect(two.rootPolicy.kind).toBe('title');
+    expect(two.rootPolicy.hasHeadingChild).toBe(true);
+    expect(two.rootPolicy.canCreateHeading).toBe(false);
+
+    const empty = buildDocument('---\ntitle: T\n---\n');
+    expect(empty.rootPolicy.kind).toBe('title');
+    expect(empty.rootPolicy.hasHeadingChild).toBe(false);
+    expect(empty.rootPolicy.canCreateHeading).toBe(true);
+  });
+
+  it('[TC-1-16-1] counts content nodes without a synthetic or title root', () => {
+    expect(contentNodeCount(buildDocument('## A\n'))).toBe(1);
+    expect(contentNodeCount(buildDocument('## A\n## B\n'))).toBe(2);
+    expect(contentNodeCount(buildDocument('---\ntitle: T\n---\n\n- a\n'))).toBe(1);
+    expect(contentNodeCount(buildDocument(''))).toBe(0);
   });
 
   it('[TC-1-2-9] returns the render tree with the document', () => {

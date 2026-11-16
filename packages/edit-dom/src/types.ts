@@ -31,6 +31,7 @@ export interface MarkmapEditorOptions {
   container: HTMLElement;
   placeholder?: string;
   onChange?: (change: EditorChange) => void;
+  onDraftChange?: (change: EditorChange) => void;
   onError?: (error: Error) => void;
 }
 

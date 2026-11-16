@@ -5,6 +5,21 @@ export interface Range {
 
 export type NodeKind = 'root' | 'heading' | 'listItem' | 'opaque';
 
+export type RootKind = 'source-heading' | 'title' | 'synthetic';
+
+export interface RootPolicy {
+  kind: RootKind;
+  hasTitle: boolean;
+  bodyStart: number;
+  hasHeadingChild: boolean;
+  canCreateHeading: boolean;
+}
+
+export interface DocumentMeta {
+  hasTitle: boolean;
+  bodyStart: number;
+}
+
 export interface ListInfo {
   ordered: boolean;
   marker: string;
@@ -48,6 +63,7 @@ export interface Document {
   nodes: Map<string, EditNode>;
   order: string[];
   unit: string;
+  rootPolicy: RootPolicy;
 }
 
 export type IssueCode =
