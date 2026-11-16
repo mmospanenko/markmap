@@ -17,6 +17,8 @@ import {
   type NodeContext,
   type Primitive,
   type Rect,
+  resolveLabelStyle,
+  type ResolvedLabelStyle,
   type Size,
   type TextAlign,
   type Theme,
@@ -64,6 +66,7 @@ export interface RenderResult {
 export interface MeasuredNode {
   text: TextLayout;
   box: Size;
+  label: ResolvedLabelStyle;
 }
 
 /** Ids from the root to every node, both included. */
@@ -83,6 +86,7 @@ function labelLayout(
   node: MarkmapNode,
   theme: Theme,
   options: RenderOptions,
+  label: ResolvedLabelStyle,
   align?: TextAlign,
   defer?: (task: Promise<unknown>) => void,
 ): TextLayout {
@@ -95,7 +99,7 @@ function labelLayout(
     defer,
   };
   return layoutText(transformContent(plugins, ctx), {
-    style: { font: theme.font, fill: theme.textFill },
+    style: { font: label.font, fill: label.fill },
     wrapWidth: options.wrapWidth,
     plugins,
     ctx,
@@ -113,26 +117,27 @@ export function measureTree(
   defer?: (task: Promise<unknown>) => void,
 ): Map<string, MeasuredNode> {
   const theme = options.theme ?? classicTheme;
-  const [top, right, bottom, left] = theme.node.padding;
   const result = new Map<string, MeasuredNode>();
   const paths = nodePaths(root);
   for (const node of visibleNodes(root, options.folded)) {
     const path = paths.get(node.id)!;
     const depth = path.length - 1;
-    const text = labelLayout(node, theme, options, undefined, defer);
     const ctx: MeasureContext = {
       depth,
       path,
       hasChildren: node.children.length > 0,
       folded: !!options.folded?.has(node.id),
     };
+    const label = resolveLabelStyle(theme, node, ctx);
+    const [top, right, bottom, left] = label.padding;
+    const text = labelLayout(node, theme, options, label, undefined, defer);
     const box = theme.node.measure
-      ? theme.node.measure(text, node, ctx)
+      ? theme.node.measure(text, node, ctx, label)
       : {
           width: text.width + left + right,
           height: Math.max(text.height + top + bottom, theme.node.minHeight ?? 0),
         };
-    result.set(node.id, { text, box });
+    result.set(node.id, { text, box, label });
   }
   return result;
 }
@@ -144,12 +149,18 @@ export function renderTree(root: MarkmapNode, options: RenderOptions): RenderRes
   const measured = measureTree(root, options, (task) => tasks.push(task));
   const paths = nodePaths(root);
   const contexts = new Map<string, NodeContext>();
+  const branchOf = (item: LayoutNode): number => {
+    let first = item;
+    while (first.depth > 1 && first.parent) first = first.parent;
+    return first.parent ? first.parent.children.indexOf(first) : 0;
+  };
   const contextOf = (item: LayoutNode): NodeContext => {
     let ctx = contexts.get(item.node.id);
     if (!ctx) {
       ctx = {
         depth: item.depth,
         path: paths.get(item.node.id)!,
+        branch: branchOf(item),
         hasChildren: item.node.children.length > 0,
         folded: item.folded,
         direction: item.direction,
@@ -168,16 +179,20 @@ export function renderTree(root: MarkmapNode, options: RenderOptions): RenderRes
   const state: DrawState = {
     nodes: layout.nodes.map((item) => {
       const ctx = contextOf(item);
-      let { text } = measured.get(item.node.id)!;
+      const measuredNode = measured.get(item.node.id)!;
+      let { text } = measuredNode;
       // Alignment depends on the direction, known only now; one line needs no alignment.
       const align = theme.node.textAlign?.(ctx) ?? 'start';
-      if (align !== 'start' && text.lines > 1) text = labelLayout(item.node, theme, options, align);
+      if (align !== 'start' && text.lines > 1) {
+        text = labelLayout(item.node, theme, options, measuredNode.label, align);
+      }
       return {
         node: item.node,
         parentId: item.parent?.node.id,
         rect: item.rect,
         ctx,
         text,
+        label: measuredNode.label,
         presence: 1,
       };
     }),
@@ -211,6 +226,7 @@ export interface DrawNode extends FrameNode {
   /** Parent in the same state; nodes without one get no edge. */
   parentId?: string;
   text: TextLayout;
+  label: ResolvedLabelStyle;
 }
 
 /** Everything needed to draw one frame. Parents come before their children. */
@@ -256,25 +272,27 @@ export function drawState(state: DrawState, theme: Theme): Primitive[] {
     });
   }
 
-  const [top, , , left] = theme.node.padding;
-  const nodes: Primitive[] = state.nodes.map((item) => ({
-    kind: 'group',
-    key: `node:${item.node.id}`,
-    nodeId: item.node.id,
-    bounds: expandRect(item.rect, BOUNDS_MARGIN),
-    transform: lookOf(item).transform
-      ? multiply(translate(item.rect.x, item.rect.y), lookOf(item).transform!)
-      : translate(item.rect.x, item.rect.y),
-    ...opacityOf(lookOf(item)),
-    children: [
-      ...theme.node.render(
-        item.node,
-        { width: item.rect.width, height: item.rect.height },
-        item.ctx,
-      ),
-      { kind: 'group', transform: translate(left, top), children: item.text.primitives },
-    ],
-  }));
+  const nodes: Primitive[] = state.nodes.map((item) => {
+    const [top, , , left] = item.label.padding;
+    return {
+      kind: 'group',
+      key: `node:${item.node.id}`,
+      nodeId: item.node.id,
+      bounds: expandRect(item.rect, BOUNDS_MARGIN),
+      transform: lookOf(item).transform
+        ? multiply(translate(item.rect.x, item.rect.y), lookOf(item).transform!)
+        : translate(item.rect.x, item.rect.y),
+      ...opacityOf(lookOf(item)),
+      children: [
+        ...theme.node.render(
+          item.node,
+          { width: item.rect.width, height: item.rect.height },
+          item.ctx,
+        ),
+        { kind: 'group', transform: translate(left, top), children: item.text.primitives },
+      ],
+    };
+  });
   return [...edges, ...nodes];
 }
 

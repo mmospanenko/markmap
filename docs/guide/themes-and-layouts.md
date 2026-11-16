@@ -98,6 +98,18 @@ Plain text, thin gray edges and fold dots.
 - Code
 ```
 
+### soft
+
+A dark block for the root, tinted blocks for first-level topics and plain labels with colored underlines below. Branch colors follow the first-level order, and root edges taper. Takes `color` and `colorDepth`.
+
+```markmap theme="soft"
+# Project
+## Plan
+- Goals
+## Build
+- Code
+```
+
 ## Colors
 
 `color` sets the branch colors, and one color paints every branch the same. `colorDepth` makes nodes below a level take their ancestor's color, where the root is level 1.
@@ -147,4 +159,6 @@ markmap-view {
 | `--mm-checkbox`, `--mm-note-dot`                                                                                                  | Checkboxes, note dots  |
 | `--mm-toggle-bg`                                                                                                                  | Fold circles (classic) |
 | `--mm-card-bg`                                                                                                                    | Cards (cards)          |
+| `--mm-soft-root-bg`, `--mm-soft-root-text`                                                                                        | Root block (soft)      |
+| `--mm-soft-tint`, `--mm-soft-toggle`                                                                                              | Topic tint and folds   |
 | `--mm-syntax-keyword`, `--mm-syntax-string`, `--mm-syntax-comment`, `--mm-syntax-number`, `--mm-syntax-title`, `--mm-syntax-attr` | Code in popovers       |

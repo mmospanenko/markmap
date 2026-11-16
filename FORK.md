@@ -8,6 +8,7 @@ The upstream renderer, layout, view, toolbar, and themes stay unchanged. The for
 - `@markmap/edit` applies source-preserving label, sibling, child, move, delete, outdent, and checkbox commands.
 - `@markmap/edit-dom` adds selection, keyboard handling, the overlay label field, pointer drag with a drop indicator, and undo/redo.
 - `@markmap/parse` and the `@markmap/core` types carry the source ranges the editor needs.
+- `@markmap/render` adds the `soft` theme, per-node label metrics and the matching editor overlay.
 
 The branch also supports an empty document, keeps a promoted heading root selected after a rename or undo, and uses a zero-width marker for empty nested labels.
 

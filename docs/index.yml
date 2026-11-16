@@ -8,6 +8,9 @@ documents:
   - id: PRD-3
     title: Notes editing
     path: prd/0003-notes.md
+  - id: PRD-4
+    title: Soft tree theme
+    path: prd/0004-soft-theme.md
   - id: ADR-1
     title: Source-preserving edits over a validated model
     path: adr/0001-source-preserving-edits.md

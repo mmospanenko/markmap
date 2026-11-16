@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import type { MarkmapNode, Rect, Side } from '@markmap/core';
 import { labelText, notesText, type Document } from '@markmap/model';
+import { softTheme } from '@markmap/render';
 import type { Markmap } from '@markmap/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MarkmapEditor, createEditView } from '.';
 import { History } from './history';
-import type { EditView, HistoryEntry, MarkmapEditorOptions } from './types';
+import type { EditLabelStyle, EditView, HistoryEntry, MarkmapEditorOptions } from './types';
 
 class FakeView implements EditView {
   element = document.createElement('div');
@@ -18,6 +19,7 @@ class FakeView implements EditView {
   focused: string[] = [];
   rects = new Map<string, Rect | undefined>();
   directions = new Map<string, Side>();
+  labels = new Map<string, EditLabelStyle>();
   defaultDirection: Side | undefined;
   known = new Set<string>();
   hidden = new Set<string>();
@@ -72,6 +74,10 @@ class FakeView implements EditView {
 
   direction(id: string): Side | undefined {
     return this.directions.get(id) ?? this.defaultDirection;
+  }
+
+  labelStyle(id: string): EditLabelStyle | undefined {
+    return this.labels.get(id);
   }
 
   hitAt(): { kind: string; nodeId?: string } | undefined {
@@ -1089,6 +1095,33 @@ describe('MarkmapEditor edges', () => {
     expect(editor.isEditing).toBe(false);
   });
 
+  it('[TC-4-5-1] styles the overlay field from the selected node label', () => {
+    const { container, view, editor } = setup('# Root\n\n- a\n');
+    const root = editor.document.root;
+    view.labels.set(root, {
+      font: {
+        family: 'Inter, sans-serif',
+        size: 20,
+        weight: 600,
+        style: 'normal',
+        lineHeight: 26,
+      },
+      fill: '#ffffff',
+      padding: [14, 18, 14, 18],
+      align: 'center',
+    });
+    editor.startEditing(root);
+
+    const field = container.querySelector<HTMLTextAreaElement>('.mm-editor-field')!;
+    expect(field.style.fontFamily).toBe('Inter, sans-serif');
+    expect(field.style.fontSize).toBe('20px');
+    expect(field.style.fontWeight).toBe('600');
+    expect(field.style.lineHeight).toBe('26px');
+    expect(field.style.color).toBe('#ffffff');
+    expect(field.style.padding).toBe('14px 18px');
+    expect(field.style.textAlign).toBe('center');
+  });
+
   it('[TC-2-13-10] exits an unchanged field on Enter', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
@@ -1743,6 +1776,71 @@ describe('createEditView', () => {
     expect(mm.toggle).toHaveBeenCalledWith('a');
     expect(mm.focusNode).toHaveBeenCalledWith('a', { animate: false });
     expect(mm.on).toHaveBeenCalledWith('render', expect.any(Function));
+  });
+});
+
+describe('createEditView label style', () => {
+  it('[TC-4-5-2] resolves the selected node style and its dark fill', () => {
+    const element = document.createElement('div');
+    const node = {
+      id: 'root',
+      type: 'heading',
+      content: [],
+      notes: [],
+      data: {},
+      children: [],
+    } as unknown as MarkmapNode;
+    const ctx = {
+      depth: 0,
+      path: ['root'],
+      branch: 0,
+      hasChildren: false,
+      folded: false,
+      direction: 'right' as const,
+    };
+    const result = {
+      theme: softTheme,
+      layout: {
+        byId: new Map([['root', { node, ctx, rect: { x: 0, y: 0, width: 20, height: 30 } }]]),
+        nodes: [],
+        bounds: { x: 0, y: 0, width: 20, height: 30 },
+      },
+      contexts: new Map([['root', ctx]]),
+      state: {
+        nodes: [
+          {
+            node,
+            ctx,
+            rect: { x: 0, y: 0, width: 20, height: 30 },
+            text: { width: 20, height: 30, lines: 1, runs: [], primitives: [] },
+            label: { font: softTheme.font, fill: 'var(--mm-text)', padding: [0, 0, 0, 0] },
+            presence: 1,
+          },
+        ],
+      },
+      primitives: [],
+      bounds: { x: 0, y: 0, width: 20, height: 30 },
+    };
+    const mm = {
+      element,
+      transform: { k: 1, x: 0, y: 0 },
+      options: { colorScheme: 'dark' },
+      result,
+    };
+    const view = createEditView(mm as unknown as Markmap);
+
+    expect(view.labelStyle?.('missing')).toBeUndefined();
+    expect(view.labelStyle?.('root')).toMatchObject({
+      font: { size: 20, weight: 600 },
+      fill: '#ffffff',
+      padding: [14, 18, 14, 18],
+      align: 'center',
+    });
+    const autoView = createEditView({
+      ...mm,
+      options: { colorScheme: 'auto' },
+    } as unknown as Markmap);
+    expect(autoView.labelStyle?.('root')?.font.size).toBe(20);
   });
 });
 

@@ -12,6 +12,8 @@ export interface NodeContext {
   depth: number;
   /** Ids from the root to this node, both included. Ids are stable, so themes can hash them for colors. */
   path: readonly string[];
+  /** Zero-based position of the node's first-level ancestor among its siblings. */
+  branch?: number;
   hasChildren: boolean;
   folded: boolean;
   /** The way the node grows away from its parent, from the layout. */
@@ -37,6 +39,18 @@ export interface PresenceStyle {
 
 export type TextAlign = 'start' | 'center' | 'end';
 
+export interface LabelStyle {
+  font?: FontStyle;
+  fill?: Paint;
+  padding?: [number, number, number, number];
+}
+
+export interface ResolvedLabelStyle {
+  font: FontStyle;
+  fill: Paint;
+  padding: [number, number, number, number];
+}
+
 export interface Theme {
   name: string;
   /** Theme-specific Markdown options, such as colors. Validated before `configure` sees them. */
@@ -51,12 +65,18 @@ export interface Theme {
   /** Font family for inline code. */
   codeFontFamily: string;
   textFill: Paint;
+  label?(node: MarkmapNode, ctx: MeasureContext): LabelStyle | undefined;
   node: {
     /** `[top, right, bottom, left]` around the content. */
     padding: [number, number, number, number];
     minHeight?: number;
     /** Box size from content size. Defaults to content plus padding, at least `minHeight` tall. */
-    measure?(content: Size, node: MarkmapNode, ctx: MeasureContext): Size;
+    measure?(
+      content: Size,
+      node: MarkmapNode,
+      ctx: MeasureContext,
+      label: ResolvedLabelStyle,
+    ): Size;
     /** Alignment of wrapped label lines. Defaults to `start`. */
     textAlign?(ctx: NodeContext): TextAlign;
     /**
@@ -74,5 +94,18 @@ export interface Theme {
   };
   edge: {
     render(from: Anchor, to: Anchor, ctx: EdgeContext): Primitive[];
+  };
+}
+
+export function resolveLabelStyle(
+  theme: Theme,
+  node: MarkmapNode,
+  ctx: MeasureContext,
+): ResolvedLabelStyle {
+  const label = theme.label?.(node, ctx);
+  return {
+    font: label?.font ?? theme.font,
+    fill: label?.fill ?? theme.textFill,
+    padding: label?.padding ?? theme.node.padding,
   };
 }

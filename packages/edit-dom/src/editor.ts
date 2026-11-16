@@ -1688,24 +1688,39 @@ export class MarkmapEditor {
     const box = this.container.getBoundingClientRect();
     const field = editing.field;
     const scale = this.view.scale;
-    const fontSize = Number.parseFloat(getComputedStyle(field).fontSize) || 16;
-    const lineHeight = 20;
+    const label = this.view.labelStyle?.(editing.previewId);
+    const fontSize =
+      label?.font.size ?? (Number.parseFloat(getComputedStyle(field).fontSize) || 16);
+    const lineHeight = label?.font.lineHeight ?? 20;
+    const padding = label?.padding ?? [0, 8, 0, 8];
+    if (label) {
+      field.style.fontFamily = label.font.family;
+      field.style.fontSize = `${label.font.size}px`;
+      field.style.fontWeight = String(label.font.weight);
+      field.style.fontStyle = label.font.style;
+      field.style.lineHeight = `${label.font.lineHeight}px`;
+      field.style.color = label.fill;
+    }
+    field.style.padding = `${padding[0]}px ${padding[1]}px ${padding[2]}px ${padding[3]}px`;
     const context = field.ownerDocument.createElement('canvas').getContext('2d');
     if (context) context.font = getComputedStyle(field).font;
     const textWidth =
       field.value.split('\n').reduce((max, line) => {
         if (!context) return Math.max(max, line.length * fontSize * 0.85);
         return Math.max(max, context.measureText(line).width);
-      }, 0) + 16;
+      }, 0) +
+      padding[1] +
+      padding[3];
     const width = Math.max(rect.width / scale, textWidth, 40);
     const rows = field.value.split('\n').length;
     const direction = this.view.direction(editing.previewId);
     const align =
-      direction === 'left'
+      label?.align ??
+      (direction === 'left'
         ? 'right'
         : direction === 'top' || direction === 'bottom'
           ? 'center'
-          : 'left';
+          : 'left');
     const left =
       align === 'center'
         ? rect.x + rect.width / 2 - (width * scale) / 2
@@ -1715,7 +1730,11 @@ export class MarkmapEditor {
     field.style.left = `${left - box.x}px`;
     field.style.top = `${rect.y - box.y}px`;
     field.style.width = `${width}px`;
-    field.style.height = `${Math.max(1, rect.height / scale, rows * lineHeight)}px`;
+    field.style.height = `${Math.max(
+      1,
+      rect.height / scale,
+      rows * lineHeight + padding[0] + padding[2],
+    )}px`;
     field.style.textAlign = align;
     field.style.transform = `scale(${scale})`;
   }

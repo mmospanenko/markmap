@@ -11,6 +11,7 @@ import { themeCSS, toSVGString } from '../svg';
 import { cardsTheme } from './cards';
 import { classicTheme } from './classic';
 import { minimalTheme } from './minimal';
+import { createSoftTheme, softTheme } from './soft';
 
 const md = '# Root\n\n- a\n  - a1\n- b\n  - b1\n- c\n  - c1';
 const render = (theme: Theme, layout = twoSidedLayout, folded: string[] = []) =>
@@ -108,6 +109,117 @@ describe('theme CSS', () => {
   });
 });
 
+describe('soft theme', () => {
+  const nodeAt = (result: ReturnType<typeof render>, depth: number) =>
+    result.state.nodes.find((item) => item.ctx.depth === depth)!;
+  const chromeOf = (result: ReturnType<typeof render>, id: string) => {
+    const item = group(result.primitives, `node:${id}`);
+    return item?.kind === 'group' ? item.children : [];
+  };
+  const edgeOf = (result: ReturnType<typeof render>, id: string) => {
+    const item = group(result.primitives, `edge:${id}`);
+    return item?.kind === 'group' ? item.children[0] : undefined;
+  };
+  const colorOfEdge = (edge: Primitive | undefined) =>
+    edge?.kind === 'path' ? (edge.fill ?? edge.stroke) : undefined;
+
+  it('[TC-4-1-1] resolves label font, fill and padding by depth before measurement', () => {
+    const result = render(softTheme);
+    const root = nodeAt(result, 0);
+    const topic = nodeAt(result, 1);
+    const leaf = nodeAt(result, 2);
+
+    expect(root.text.runs[0]).toMatchObject({
+      font: { size: 20, weight: 600, lineHeight: 26 },
+      fill: 'var(--mm-soft-root-text)',
+    });
+    expect(topic.text.runs[0]).toMatchObject({
+      font: { size: 16, weight: 500, lineHeight: 22 },
+      fill: 'var(--mm-text)',
+    });
+    expect(leaf.text.runs[0]).toMatchObject({
+      font: { size: 14, weight: 400, lineHeight: 20 },
+      fill: 'var(--mm-text)',
+    });
+    expect(root.rect.height).toBeGreaterThan(topic.rect.height);
+    expect(topic.rect.height).toBeGreaterThan(leaf.rect.height);
+  });
+
+  it('[TC-4-1-2] draws root and topic blocks and a leaf underline', () => {
+    const result = render(softTheme);
+    const root = nodeAt(result, 0);
+    const topic = nodeAt(result, 1);
+    const leaf = nodeAt(result, 2);
+    const rootChrome = chromeOf(result, root.node.id);
+    const topicChrome = chromeOf(result, topic.node.id);
+    const leafChrome = chromeOf(result, leaf.node.id);
+
+    expect(rootChrome[0]).toMatchObject({
+      kind: 'rect',
+      fill: 'var(--mm-soft-root-bg)',
+      r: 7,
+    });
+    expect(topicChrome[0]).toMatchObject({ kind: 'rect', r: 6 });
+    expect(topicChrome[1]).toMatchObject({
+      kind: 'rect',
+      fill: 'var(--mm-soft-tint)',
+      strokeWidth: 1.2,
+    });
+    expect(leafChrome[0]).toMatchObject({ kind: 'path', strokeWidth: 1.5 });
+    expect(leafChrome[0].kind === 'path' ? leafChrome[0].fill : 'set').toBeUndefined();
+  });
+
+  it('[TC-4-2-1] gives each first-level branch one inherited color', () => {
+    const result = render(softTheme);
+    const topics = result.state.nodes.filter((item) => item.ctx.depth === 1);
+    const first = topics[0];
+    const second = topics[1];
+    const child = result.state.nodes.find(
+      (item) => item.ctx.depth === 2 && item.ctx.path[1] === first.node.id,
+    )!;
+
+    expect(colorOfEdge(edgeOf(result, first.node.id))).toBe('var(--mm-branch-0)');
+    expect(colorOfEdge(edgeOf(result, second.node.id))).toBe('var(--mm-branch-1)');
+    expect(colorOfEdge(edgeOf(result, child.node.id))).toBe('var(--mm-branch-0)');
+  });
+
+  it('[TC-4-3-1] tapers the root edge and keeps deeper edges thin', () => {
+    const result = render(softTheme);
+    const topic = nodeAt(result, 1);
+    const child = result.state.nodes.find(
+      (item) => item.ctx.depth === 2 && item.ctx.path[1] === topic.node.id,
+    )!;
+    const rootEdge = edgeOf(result, topic.node.id);
+    const childEdge = edgeOf(result, child.node.id);
+
+    expect(rootEdge).toMatchObject({ kind: 'path', fill: expect.any(String) });
+    expect(rootEdge?.kind === 'path' ? rootEdge.d : '').toContain('Z');
+    expect(childEdge).toMatchObject({
+      kind: 'path',
+      stroke: expect.any(String),
+      strokeWidth: 1.5,
+    });
+    expect(childEdge?.kind === 'path' ? childEdge.fill : 'set').toBeUndefined();
+  });
+
+  it('[TC-4-4-1] provides dark tokens for every branch color and the tint', () => {
+    for (const name of Object.keys(softTheme.darkTokens ?? {})) {
+      expect(softTheme.tokens).toHaveProperty(name);
+    }
+    expect(softTheme.darkTokens?.['mm-branch-0']).not.toBe(softTheme.tokens['mm-branch-0']);
+    expect(softTheme.darkTokens?.['mm-soft-tint']).not.toBe(softTheme.tokens['mm-soft-tint']);
+  });
+
+  it('[TC-4-2-2] keeps color and colorDepth options on the configured theme', () => {
+    const themed = createSoftTheme({ color: ['#112233'], colorDepth: 0 });
+    expect(themed.tokens['mm-branch-0']).toBe('#112233');
+
+    const { options, warnings } = resolveRenderOptions({}, { theme: 'soft' });
+    expect(options.theme?.name).toBe('soft');
+    expect(warnings).toEqual([]);
+  });
+});
+
 describe('theme option', () => {
   it('picks a theme by name and applies its options on top', () => {
     const { options, warnings } = resolveRenderOptions({}, { theme: 'cards', color: ['#123456'] });
@@ -118,7 +230,7 @@ describe('theme option', () => {
 
   it('warns about unknown themes and options the theme does not have', () => {
     expect(resolveRenderOptions({}, { theme: 'fancy' }).warnings).toEqual([
-      'Unknown theme `fancy`; available: `classic`, `cards`, `minimal`',
+      'Unknown theme `fancy`; available: `classic`, `cards`, `minimal`, `soft`',
     ]);
     expect(resolveRenderOptions({}, { theme: 'minimal', color: '#fff' }).warnings).toEqual([
       'Unknown option `color`',

@@ -13,6 +13,7 @@ import { twoSidedLayout } from './layouts/two-sided';
 import { cardsTheme } from './themes/cards';
 import { classicTheme } from './themes/classic';
 import { minimalTheme } from './themes/minimal';
+import { softTheme } from './themes/soft';
 
 /** Layouts Markdown can pick by name with the `layout` option. */
 export const builtinLayouts: Readonly<Record<string, Layout>> = Object.freeze({
@@ -26,6 +27,7 @@ export const builtinThemes: Readonly<Record<string, Theme>> = Object.freeze({
   [classicTheme.name]: classicTheme,
   [cardsTheme.name]: cardsTheme,
   [minimalTheme.name]: minimalTheme,
+  [softTheme.name]: softTheme,
 });
 
 export interface ResolveOptions {

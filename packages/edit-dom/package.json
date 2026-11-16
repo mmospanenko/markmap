@@ -26,6 +26,7 @@
     "@markmap/core": "workspace:*",
     "@markmap/edit": "workspace:*",
     "@markmap/model": "workspace:*",
+    "@markmap/render": "workspace:*",
     "@markmap/view": "workspace:*",
     "d3-selection": "^3.0.1"
   },
