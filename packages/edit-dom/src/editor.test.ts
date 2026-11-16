@@ -1120,6 +1120,20 @@ describe('MarkmapEditor edges', () => {
     expect(field.style.color).toBe('#ffffff');
     expect(field.style.padding).toBe('14px 18px');
     expect(field.style.textAlign).toBe('center');
+
+    view.scale = 2;
+    view.emit('zoom');
+    expect(field.style.transform).toBe('scale(2)');
+    expect(field.style.height).toBe('54px');
+
+    const label = view.labels.get(root);
+    if (!label) throw new Error('Missing label style');
+    view.labels.set(root, { ...label, align: 'start' });
+    view.emit('render');
+    expect(field.style.textAlign).toBe('left');
+    view.labels.set(root, { ...label, align: 'end' });
+    view.emit('render');
+    expect(field.style.textAlign).toBe('right');
   });
 
   it('[TC-2-13-10] exits an unchanged field on Enter', () => {

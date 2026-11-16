@@ -1721,10 +1721,11 @@ export class MarkmapEditor {
         : direction === 'top' || direction === 'bottom'
           ? 'center'
           : 'left');
+    const textAlign = align === 'start' ? 'left' : align === 'end' ? 'right' : align;
     const left =
-      align === 'center'
+      textAlign === 'center'
         ? rect.x + rect.width / 2 - (width * scale) / 2
-        : align === 'right'
+        : textAlign === 'right'
           ? rect.x + rect.width - width * scale
           : rect.x;
     field.style.left = `${left - box.x}px`;
@@ -1735,7 +1736,7 @@ export class MarkmapEditor {
       rect.height / scale,
       rows * lineHeight + padding[0] + padding[2],
     )}px`;
-    field.style.textAlign = align;
+    field.style.textAlign = textAlign;
     field.style.transform = `scale(${scale})`;
   }
 
