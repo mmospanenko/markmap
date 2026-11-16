@@ -41,6 +41,7 @@ const ROOT_EDGE_END = 1.3;
 const BRANCH_EDGE_WIDTH = 1.5;
 const LEAF_UNDERLINE = 1.5;
 const TOGGLE_RADIUS = 6;
+const LEAF_BASELINE_INSET = 3;
 
 const darkBranchTokens = Object.fromEntries(
   DARK_COLORS.map((color, index) => [`mm-branch-${index}`, color]),
@@ -189,7 +190,7 @@ export function createSoftTheme(options: SoftThemeOptions = {}): Theme {
             },
           );
         } else {
-          const y = box.height - 3;
+          const y = box.height - LEAF_BASELINE_INSET;
           chrome.push({
             kind: 'path',
             d: `M0,${y}H${box.width}`,
@@ -222,7 +223,7 @@ export function createSoftTheme(options: SoftThemeOptions = {}): Theme {
                   ? 0
                   : ctx.direction === 'bottom'
                     ? box.height
-                    : box.height - 3,
+                    : box.height - LEAF_BASELINE_INSET,
               );
         chrome.push({
           kind: 'rect',
@@ -239,7 +240,8 @@ export function createSoftTheme(options: SoftThemeOptions = {}): Theme {
       },
       anchor(rect, side, ctx) {
         if (side === 'left' || side === 'right') {
-          const y = ctx.depth <= 1 ? rect.y + rect.height / 2 : rect.y + rect.height - 3;
+          const y =
+            ctx.depth <= 1 ? rect.y + rect.height / 2 : rect.y + rect.height - LEAF_BASELINE_INSET;
           return { x: side === 'left' ? rect.x : rect.x + rect.width, y, side };
         }
         return {

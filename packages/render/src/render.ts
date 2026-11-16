@@ -184,7 +184,9 @@ export function renderTree(root: MarkmapNode, options: RenderOptions): RenderRes
       // Alignment depends on the direction, known only now; one line needs no alignment.
       const align = theme.node.textAlign?.(ctx) ?? 'start';
       if (align !== 'start' && text.lines > 1) {
-        text = labelLayout(item.node, theme, options, measuredNode.label, align);
+        text = labelLayout(item.node, theme, options, measuredNode.label, align, (task) =>
+          tasks.push(task),
+        );
       }
       return {
         node: item.node,
@@ -226,7 +228,7 @@ export interface DrawNode extends FrameNode {
   /** Parent in the same state; nodes without one get no edge. */
   parentId?: string;
   text: TextLayout;
-  label: ResolvedLabelStyle;
+  label?: ResolvedLabelStyle;
 }
 
 /** Everything needed to draw one frame. Parents come before their children. */
@@ -273,7 +275,7 @@ export function drawState(state: DrawState, theme: Theme): Primitive[] {
   }
 
   const nodes: Primitive[] = state.nodes.map((item) => {
-    const [top, , , left] = item.label.padding;
+    const [top, , , left] = item.label?.padding ?? theme.node.padding;
     return {
       kind: 'group',
       key: `node:${item.node.id}`,
