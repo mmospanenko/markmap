@@ -7,7 +7,7 @@ import {
   type Command,
   type EditResult,
 } from '@markmap/edit';
-import type { Rect } from '@markmap/core';
+import type { MarkmapNode, Rect } from '@markmap/core';
 import {
   labelText,
   nodeAtOffset,
@@ -140,6 +140,7 @@ interface Editing {
   field: HTMLTextAreaElement;
   draft: EditResult | null;
   draftText: string | null;
+  draftBase: string | null;
   emitted: string | null;
 }
 
@@ -211,6 +212,7 @@ export class MarkmapEditor {
   private suppressClick = false;
   private previewFrame: number | null = null;
   private previewing = false;
+  private renderedSource: string | null = null;
   private destroyed = false;
 
   constructor({
@@ -226,6 +228,7 @@ export class MarkmapEditor {
     this.container = container;
     const parsed = parseDocument(source);
     this.doc = parsed.document;
+    this.renderedSource = this.doc.source;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
     this.onChange = onChange;
     this.onDraftChange = onDraftChange;
@@ -313,7 +316,7 @@ export class MarkmapEditor {
     this.doc = parsed.document;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
     this.history.clear();
-    this.view.setTree(parsed.tree);
+    this.render(this.doc.source, parsed.tree);
     const offset = options.selection ?? this.doc.nodes.get(this.doc.root)?.label?.start ?? 0;
     if (options.selection == null) {
       this.selectionOffset = offset;
@@ -359,6 +362,7 @@ export class MarkmapEditor {
       field: this.field,
       draft: null,
       draftText: null,
+      draftBase: null,
       emitted: null,
     };
     this.setMode(true);
@@ -407,8 +411,7 @@ export class MarkmapEditor {
     if (!editing) return this.doc.source;
     const text = editing.field.value;
     if (text === editing.original || (editing.blank && text === '')) return this.doc.source;
-    if (editing.draft && editing.draftText === text) return editing.draft.document.source;
-    return editing.emitted ?? this.doc.source;
+    return this.snapshotDraft(editing, text);
   }
 
   setLabel(nodeId: string, text: string): boolean {
@@ -1511,31 +1514,49 @@ export class MarkmapEditor {
   }
 
   private apply(command: Command): EditResult | null {
-    const folds = this.captureFolds(this.doc);
-    const editing = this.editing;
     try {
-      const source = this.doc.source;
-      const result = applyCommand(this.doc, command);
-      this.doc = result.document;
-      if (this.doc.source === source) return result;
-      if (!result.edits.length) return result;
-      if (editing && command.type === 'setLabel' && command.node === editing.nodeId) {
-        const target = nodeAtOffset(result.document, result.selection);
-        if (target) {
-          editing.nodeId = target.id;
-          editing.previewId = target.id;
-        }
-      }
-      this.view.setTree(result.tree);
-      this.restoreFolds(folds, result);
-      this.selectAt(result.selection, { reveal: false });
-      if (command.type === 'setNotes') this.select(command.node, { reveal: false });
-      this.emitChange();
-      return result;
+      return this.applyResult(applyCommand(this.doc, command), command);
     } catch (error) {
       this.onError?.(error instanceof Error ? error : new Error(String(error)));
       return null;
     }
+  }
+
+  private applyDraft(draft: EditResult, command: Command): EditResult | null {
+    try {
+      return this.applyResult(draft, command);
+    } catch (error) {
+      this.onError?.(error instanceof Error ? error : new Error(String(error)));
+      return null;
+    }
+  }
+
+  private applyResult(result: EditResult, command: Command): EditResult {
+    const folds = this.captureFolds(this.doc);
+    const editing = this.editing;
+    const source = this.doc.source;
+    this.doc = result.document;
+    if (this.doc.source === source) return result;
+    if (!result.edits.length) return result;
+    if (editing && command.type === 'setLabel' && command.node === editing.nodeId) {
+      const target = nodeAtOffset(result.document, result.selection);
+      if (target) {
+        editing.nodeId = target.id;
+        editing.previewId = target.id;
+      }
+    }
+    if (this.renderedSource !== this.doc.source) {
+      if (editing) {
+        editing.preview = false;
+        editing.previewId = editing.nodeId;
+      }
+      this.render(this.doc.source, result.tree);
+    }
+    this.restoreFolds(folds, result);
+    this.selectAt(result.selection, { reveal: false });
+    if (command.type === 'setNotes') this.select(command.node, { reveal: false });
+    this.emitChange();
+    return result;
   }
 
   private commitEditing(options: { history?: boolean } = {}): 'none' | 'changed' | 'error' {
@@ -1548,9 +1569,12 @@ export class MarkmapEditor {
     }
     const before = this.historyEntry();
     const source = this.doc.source;
-    const result = editing.createRoot
-      ? this.apply({ type: 'createRootHeading', node: editing.nodeId, text })
-      : this.apply({ type: 'setLabel', node: editing.nodeId, text });
+    const command = this.labelCommand(editing, text);
+    const draft =
+      editing.draft && editing.draftText === text && editing.draftBase === this.doc.source
+        ? editing.draft
+        : null;
+    const result = draft ? this.applyDraft(draft, command) : this.apply(command);
     if (!result) return 'error';
     if (this.doc.source === source) {
       this.completeEditing('cancel');
@@ -1594,15 +1618,12 @@ export class MarkmapEditor {
       this.restorePreview(editing, true);
       return;
     }
+    const base = this.doc.source;
     try {
-      const result = applyCommand(
-        this.doc,
-        editing.createRoot
-          ? { type: 'createRootHeading', node: editing.nodeId, text }
-          : { type: 'setLabel', node: editing.nodeId, text },
-      );
+      const result = applyCommand(this.doc, this.labelCommand(editing, text));
       editing.draft = result;
       editing.draftText = text;
+      editing.draftBase = base;
       this.schedulePreview();
       const source = result.document.source;
       if (source === this.doc.source) {
@@ -1622,6 +1643,30 @@ export class MarkmapEditor {
     }
   }
 
+  private snapshotDraft(editing: Editing, text: string): string {
+    const draft = editing.draft;
+    if (draft && editing.draftText === text && editing.draftBase === this.doc.source) {
+      return draft.document.source;
+    }
+    if (editing.draftBase === this.doc.source) return editing.emitted ?? this.doc.source;
+    try {
+      return applyCommand(this.doc, this.labelCommand(editing, text)).document.source;
+    } catch {
+      return this.doc.source;
+    }
+  }
+
+  private labelCommand(editing: Editing, text: string): Command {
+    return editing.createRoot
+      ? { type: 'createRootHeading', node: editing.nodeId, text }
+      : { type: 'setLabel', node: editing.nodeId, text };
+  }
+
+  private render(source: string, tree: MarkmapNode): void {
+    this.view.setTree(tree);
+    this.renderedSource = source;
+  }
+
   private schedulePreview(): void {
     if (this.previewFrame !== null) return;
     this.previewFrame = window.requestAnimationFrame(this.renderPreview);
@@ -1637,11 +1682,12 @@ export class MarkmapEditor {
     this.previewFrame = null;
     const editing = this.editing;
     if (!editing || !editing.draft) return;
+    if (editing.draftBase !== this.doc.source) return;
     const result = editing.draft;
     const folds = this.captureFolds(this.doc);
     this.previewing = true;
     try {
-      this.view.setTree(result.tree);
+      this.render(result.document.source, result.tree);
       this.restoreFolds(folds, result);
     } finally {
       this.previewing = false;
@@ -1660,7 +1706,7 @@ export class MarkmapEditor {
       const parsed = parseDocument(this.doc.source);
       this.previewing = true;
       try {
-        this.view.setTree(parsed.tree);
+        this.render(this.doc.source, parsed.tree);
         this.view.setFoldedIds(editing.folds, { animate: false });
       } finally {
         this.previewing = false;
@@ -1671,6 +1717,7 @@ export class MarkmapEditor {
     }
     editing.draft = null;
     editing.draftText = null;
+    editing.draftBase = null;
     const emitted = editing.emitted;
     editing.emitted = null;
     if (notifyBaseline) this.publishBaseline(emitted);
@@ -1856,7 +1903,7 @@ export class MarkmapEditor {
     this.completeEditing('switch', false);
     this.doc = parsed.document;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
-    this.view.setTree(parsed.tree);
+    this.render(this.doc.source, parsed.tree);
     this.view.setFoldedIds(entry.folded, { animate: false });
     this.selectAt(entry.selection, { reveal: false });
     this.emitChange();

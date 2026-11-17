@@ -1120,6 +1120,190 @@ describe('MarkmapEditor', () => {
   });
 });
 
+describe('Commit path', () => {
+  it('[TC-2-27-1] reuses the current preview and skips a redraw on commit', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    frames.flush();
+    const draft = drafts.at(-1);
+    if (!draft) throw new Error('No draft');
+    expect(setTree).toHaveBeenCalledTimes(1);
+
+    editor.commit();
+
+    expect(editor.source).toBe('- draft\n- b\n');
+    expect(setTree).toHaveBeenCalledTimes(1);
+    expect(changes.at(-1)?.document).toBe(draft.document);
+    expect(editor.isEditing).toBe(false);
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('- draft\n- b\n');
+  });
+
+  it('[TC-2-27-2] recomputes a draft invalidated by another command', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    const stale = drafts.at(-1);
+    if (!stale) throw new Error('No draft');
+
+    expect(editor.setLabel(nodeId(editor, 'b'), 'changed')).toBe(true);
+    frames.flush();
+    expect(treeLabel(view.tree?.children[0])).toBe('a');
+    expect(treeLabel(view.tree?.children[1])).toBe('changed');
+    expect(editor.snapshot()).toBe('- draft\n- changed\n');
+    expect(editor.source).toBe('- a\n- changed\n');
+
+    key(field(container), 'Enter');
+
+    expect(editor.source).toBe('- draft\n- changed\n');
+    expect(changes.at(-1)?.document).not.toBe(stale.document);
+    expect(treeLabel(view.tree?.children[0])).toBe('draft');
+    expect(treeLabel(view.tree?.children[1])).toBe('changed');
+
+    const rendered = setup();
+    const renderedFrames = captureFrames();
+    const setTree = vi.spyOn(rendered.view, 'setTree');
+    clickNode(rendered.container, rendered.view, nodeId(rendered.editor, 'a'));
+    key(rendered.container, ' ');
+    type(rendered.container, 'draft');
+    renderedFrames.flush();
+    expect(treeLabel(rendered.view.tree?.children[0])).toBe('draft');
+    const drawn = setTree.mock.calls.length;
+
+    expect(rendered.editor.setLabel(nodeId(rendered.editor, 'b'), 'changed')).toBe(true);
+    expect(treeLabel(rendered.view.tree?.children[0])).toBe('a');
+    expect(rendered.editor.isEditing).toBe(true);
+    key(field(rendered.container), 'Escape');
+    expect(setTree).toHaveBeenCalledTimes(drawn + 1);
+    expect(treeLabel(rendered.view.tree?.children[0])).toBe('a');
+    expect(treeLabel(rendered.view.tree?.children[1])).toBe('changed');
+    expect(rendered.editor.source).toBe('- a\n- changed\n');
+    expect(rendered.editor.isEditing).toBe(false);
+  });
+
+  it('[TC-2-27-3] commits a pending preview without a late overwrite', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    const draft = drafts.at(-1);
+    if (!draft) throw new Error('No draft');
+    expect(setTree).not.toHaveBeenCalled();
+    const pending = frames.frames[0];
+
+    editor.commit();
+
+    expect(editor.source).toBe('- draft\n- b\n');
+    expect(changes.at(-1)?.document).toBe(draft.document);
+    expect(setTree).toHaveBeenCalledTimes(1);
+
+    if (pending) pending(0);
+    expect(setTree).toHaveBeenCalledTimes(1);
+    expect(treeLabel(view.tree?.children[0])).toBe('draft');
+    expect(editor.isEditing).toBe(false);
+  });
+
+  it('[TC-2-27-4] keeps cancel, source replacement and destroy correct after a rendered preview', () => {
+    const frames = captureFrames();
+
+    const cancelled = setup();
+    const cancelTree = vi.spyOn(cancelled.view, 'setTree');
+    clickNode(cancelled.container, cancelled.view, nodeId(cancelled.editor, 'a'));
+    key(cancelled.container, ' ');
+    type(cancelled.container, 'draft');
+    frames.flush();
+    key(field(cancelled.container), 'Escape');
+    expect(treeLabel(cancelled.view.tree?.children[0])).toBe('a');
+    key(cancelled.container, ' ');
+    type(cancelled.container, 'draft');
+    cancelled.editor.commit();
+    expect(cancelled.editor.source).toBe('- draft\n- b\n');
+    expect(treeLabel(cancelled.view.tree?.children[0])).toBe('draft');
+    expect(cancelTree).toHaveBeenCalledTimes(3);
+
+    const switched = setup();
+    const switchTree = vi.spyOn(switched.view, 'setTree');
+    clickNode(switched.container, switched.view, nodeId(switched.editor, 'a'));
+    key(switched.container, ' ');
+    type(switched.container, 'draft');
+    frames.flush();
+    switched.editor.setSource('- z\n');
+    clickNode(switched.container, switched.view, nodeId(switched.editor, 'z'));
+    key(switched.container, ' ');
+    type(switched.container, 'w');
+    switched.editor.commit();
+    expect(switched.editor.source).toBe('- w\n');
+    expect(treeLabel(switched.view.tree?.children[0])).toBe('w');
+    expect(switchTree).toHaveBeenCalledTimes(3);
+
+    const destroyed = setup();
+    const destroyTree = vi.spyOn(destroyed.view, 'setTree');
+    clickNode(destroyed.container, destroyed.view, nodeId(destroyed.editor, 'a'));
+    key(destroyed.container, ' ');
+    type(destroyed.container, 'draft');
+    frames.flush();
+    type(destroyed.container, 'gone');
+    const pending = frames.frames.at(-1);
+    destroyed.editor.destroy();
+    if (pending) pending(0);
+    expect(destroyed.editor.source).toBe('- a\n- b\n');
+    expect(destroyTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('[TC-2-27-5] reuses the draft for a Tab commit and records one history entry', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    frames.flush();
+    const draft = drafts.at(-1);
+    if (!draft) throw new Error('No draft');
+
+    key(field(container), 'Tab');
+
+    expect(editor.source).toBe('- draft\n  - New topic\n- b\n');
+    expect(changes[0]?.document).toBe(draft.document);
+    expect(setTree).toHaveBeenCalledTimes(2);
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('New topic');
+
+    key(field(container), 'Escape');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-27-6] never returns a stale draft source after another command', () => {
+    const { container, view, editor, errors } = setup('# A\n\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, ' ');
+    type(container, 'AB');
+    expect(editor.snapshot()).toBe('# AB\n\n- b\n');
+    expect(editor.setLabel(nodeId(editor, 'b'), 'changed')).toBe(true);
+
+    type(container, 'A\nB');
+
+    expect(editor.snapshot()).toBe('# A\n\n- changed\n');
+    expect(editor.source).toBe('# A\n\n- changed\n');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n\n- changed\n');
+    expect(editor.isEditing).toBe(true);
+    expect(errors.at(-1)?.message).toContain('line break');
+  });
+});
+
 describe('MarkmapEditor edges', () => {
   it('[TC-2-13-1] exposes selection, focus and empty history', () => {
     const { container, editor } = setup();
