@@ -18,6 +18,7 @@ export interface RootPolicy {
 export interface DocumentMeta {
   hasTitle: boolean;
   bodyStart: number;
+  htmlBlocks?: HtmlBlockSource[];
 }
 
 export interface ListInfo {
@@ -43,6 +44,35 @@ export interface NoteRange {
   fence: boolean;
 }
 
+export interface NodeIdentity {
+  id: string;
+  range: Range | null;
+}
+
+export interface HtmlBlockSource {
+  range: Range;
+  value: string;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  label: string | null;
+}
+
+export interface GraphGroup {
+  roots: string[];
+  label: string | null;
+}
+
+export interface GraphData {
+  edges: GraphEdge[];
+  groups: GraphGroup[];
+  block: Range | null;
+}
+
+export type RandomSource = () => number;
+
 export interface EditNode {
   id: string;
   kind: NodeKind;
@@ -53,6 +83,7 @@ export interface EditNode {
   block: Range | null;
   list: ListInfo | null;
   notes: NoteRange[];
+  identity: NodeIdentity | null;
   opaque: boolean;
   capabilities: Capabilities;
 }
@@ -64,6 +95,9 @@ export interface Document {
   order: string[];
   unit: string;
   rootPolicy: RootPolicy;
+  identities: Map<string, string>;
+  graph: GraphData;
+  conventionIssues: Issue[];
 }
 
 export type IssueCode =
@@ -76,10 +110,13 @@ export type IssueCode =
   | 'E_LEVEL'
   | 'E_INDENT'
   | 'E_SLICE'
-  | 'E_CYCLE';
+  | 'E_CYCLE'
+  | 'E_IDENTITY'
+  | 'E_GRAPH';
 
 export interface Issue {
   code: IssueCode;
   message: string;
   nodeId?: string;
+  range?: Range;
 }

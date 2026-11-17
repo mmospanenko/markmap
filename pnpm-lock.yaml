@@ -342,6 +342,9 @@ importers:
       '@markmap/parse':
         specifier: workspace:*
         version: link:../parse
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/page:
     devDependencies:
