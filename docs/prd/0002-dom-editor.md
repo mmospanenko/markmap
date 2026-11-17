@@ -8,7 +8,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 
 ## Requirements
 
-- [REQ-2-1] When the editor starts and when the user clicks a node, the editor shall select it, highlight its SVG group and keep the root selected by default.
+- [REQ-2-1] When the editor starts and when the user clicks a node, the editor shall select it, highlight its SVG group and keep the root selected by default. A click on empty map space shall clear the selection, the highlight and the frame, and blur the editor surface; a later node click shall select again and focus the editor surface.
 - [REQ-2-2] When the user presses Enter or Tab on a selected node, the editor shall insert a sibling or child with a placeholder label, select it and start editing. The created branch shall follow the REQ-1-3 heading cap: an H1 root or heading creates H2, an H2 or deeper heading creates a list item under itself for a child or under its parent heading for a sibling, and the selected node shall be the created branch with its real kind.
 - [REQ-2-3] When editing ends, the editor shall commit with Enter, Tab or a click elsewhere, cancel with Escape, reject line breaks in heading labels and keep the field open when a label is invalid.
 - [REQ-2-4] When the user presses Shift+Tab or Delete, the editor shall outdent or remove the selected node through the core commands. When the open field of a newly inserted node is empty, Backspace or Delete shall remove that node and select the node before it.
@@ -38,7 +38,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 
 | Requirement | Tests                                             |
 | ----------- | ------------------------------------------------- |
-| REQ-2-1     | TC-2-1-1, TC-2-1-2                                |
+| REQ-2-1     | TC-2-1-1 ... TC-2-1-4                             |
 | REQ-2-2     | TC-2-2-1 ... TC-2-2-9                             |
 | REQ-2-3     | TC-2-3-1 ... TC-2-3-3                             |
 | REQ-2-4     | TC-2-4-1 ... TC-2-4-8                             |

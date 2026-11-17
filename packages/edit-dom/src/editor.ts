@@ -542,7 +542,12 @@ export class MarkmapEditor {
     if (event.button !== 0) return;
     if (this.editing && this.commitEditing() === 'error') return;
     const hit = this.hitAt(event);
-    if ((hit?.kind === 'node' || hit?.kind === 'toggle') && hit.nodeId) {
+    if (!hit) {
+      this.select(null, { reveal: false });
+      this.container.blur();
+      return;
+    }
+    if ((hit.kind === 'node' || hit.kind === 'toggle') && hit.nodeId) {
       this.select(hit.nodeId, { reveal: false });
       this.container.focus({ preventScroll: true });
     }
@@ -1873,9 +1878,7 @@ export class MarkmapEditor {
       this.selectionBox.style.display = 'none';
       return;
     }
-    const rect = this.editing
-      ? this.editing.field.getBoundingClientRect()
-      : this.view.screenRect(id);
+    const rect = this.view.screenRect(id);
     const box = this.container.getBoundingClientRect();
     if (!rect) {
       this.selectionBox.style.display = 'none';

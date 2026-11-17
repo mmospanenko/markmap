@@ -26,6 +26,43 @@ const group = (primitives: Primitive[], key: string) =>
   primitives.find((p) => p.kind === 'group' && p.key === key);
 const pathD = (p?: Primitive) =>
   p?.kind === 'group' && p.children[0].kind === 'path' ? p.children[0].d : '';
+const branchValues = (tokens: Record<string, string>) =>
+  Object.keys(tokens)
+    .filter((name) => name.startsWith('mm-branch-'))
+    .toSorted((left, right) => Number(left.slice(10)) - Number(right.slice(10)))
+    .map((name) => tokens[name]);
+const hsl = (hex: string) => {
+  const channels = (hex.slice(1).match(/../gu) ?? []).map(
+    (part) => Number.parseInt(part, 16) / 255,
+  );
+  const [red, green, blue] = channels;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  const l = (max + min) / 2;
+  const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+  let h = 0;
+  if (delta !== 0) {
+    if (max === red) h = 60 * (((green - blue) / delta) % 6);
+    else if (max === green) h = 60 * ((blue - red) / delta + 2);
+    else h = 60 * ((red - green) / delta + 4);
+  }
+  return { h: (h + 360) % 360, s, l };
+};
+const luminance = (hex: string) => {
+  const [red, green, blue] = (hex.slice(1).match(/../gu) ?? []).map((part) => {
+    const value = Number.parseInt(part, 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+};
+const contrast = (left: string, right: string) => {
+  const [bright, dark] = [luminance(left), luminance(right)].toSorted((a, b) => b - a);
+  return (bright + 0.05) / (dark + 0.05);
+};
+const hueBucket = ({ h }: { h: number }) => Math.floor(h / 60);
+const isBrown = ({ h, s, l }: { h: number; s: number; l: number }) =>
+  h >= 25 && h <= 50 && s >= 0.3 && l >= 0.35 && l <= 0.7;
 
 describe.each([classicTheme, cardsTheme, minimalTheme])('$name theme', (theme) => {
   it('connects every edge to the anchors on both nodes, in every layout', () => {
@@ -191,6 +228,23 @@ describe('soft theme', () => {
     expect(colorOfEdge(edgeOf(result, first.node.id))).toBe('var(--mm-branch-0)');
     expect(colorOfEdge(edgeOf(result, second.node.id))).toBe('var(--mm-branch-1)');
     expect(colorOfEdge(edgeOf(result, child.node.id))).toBe('var(--mm-branch-0)');
+  });
+
+  it('[TC-4-2-3] balances the default branch palette with brown as one accent', () => {
+    const light = branchValues(softTheme.tokens);
+    const dark = branchValues(softTheme.darkTokens ?? {});
+    expect(light).toHaveLength(6);
+    expect(dark).toHaveLength(6);
+
+    for (const colors of [light, dark]) {
+      const measures = colors.map(hsl);
+      expect(new Set(colors).size).toBe(colors.length);
+      expect(new Set(measures.map(hueBucket)).size).toBe(colors.length);
+      expect(measures.filter(isBrown)).toHaveLength(1);
+    }
+    expect(dark.map(hsl).map(hueBucket)).toEqual(light.map(hsl).map(hueBucket));
+    for (const color of light) expect(contrast(color, '#ffffff')).toBeGreaterThanOrEqual(3);
+    for (const color of dark) expect(contrast(color, '#1e1e1e')).toBeGreaterThanOrEqual(4.5);
   });
 
   it('[TC-4-3-1] tapers the root edge and keeps deeper edges thin', () => {

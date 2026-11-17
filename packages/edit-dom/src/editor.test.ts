@@ -290,6 +290,43 @@ describe('MarkmapEditor', () => {
     ).toBe(true);
   });
 
+  it('[TC-2-1-4] clears selection and focus on an empty canvas click and restores both on a node click', () => {
+    const { container, view, editor } = setup();
+    const b = nodeId(editor, 'b');
+    clickNode(container, view, b);
+    expect(editor.selected).toBe(b);
+    expect(document.activeElement).toBe(container);
+
+    view.hit = { kind: 'action', nodeId: b };
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBe(b);
+
+    view.hit = { kind: 'toggle', nodeId: b };
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBe(b);
+
+    view.hit = undefined;
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBeNull();
+    expect(view.element.querySelector('.mm-editor-selected')).toBeNull();
+    expect(container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'none',
+    );
+    expect(document.activeElement).not.toBe(container);
+
+    clickNode(container, view, b);
+    expect(editor.selected).toBe(b);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${b}"]`)
+        ?.classList.contains('mm-editor-selected'),
+    ).toBe(true);
+    expect(container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'block',
+    );
+    expect(document.activeElement).toBe(container);
+  });
+
   it('[TC-2-2-1] inserts a sibling and starts editing', () => {
     const { container, view, editor } = setup();
     clickNode(container, view, nodeId(editor, 'a'));
@@ -1134,6 +1171,43 @@ describe('MarkmapEditor edges', () => {
     view.labels.set(root, { ...label, align: 'end' });
     view.emit('render');
     expect(field.style.textAlign).toBe('right');
+  });
+
+  it('[TC-4-5-3] centers an empty topic field on its visible block', () => {
+    const { container, view, editor } = setup('# Root\n', { placeholder: '\u200B' });
+    key(container, 'Enter');
+    const topic = selectedId(editor);
+    expect(field(container).value).toBe('');
+    view.rects.set(topic, { x: 120, y: 40, width: 28, height: 40 });
+    view.directions.set(topic, 'right');
+    view.labels.set(topic, {
+      font: {
+        family: 'Inter, sans-serif',
+        size: 16,
+        weight: 500,
+        style: 'normal',
+        lineHeight: 22,
+      },
+      fill: '#2b3138',
+      padding: [9, 14, 9, 14],
+      align: 'center',
+    });
+    view.emit('render');
+
+    const element = field(container);
+    expect(element.style.padding).toBe('9px 14px');
+    expect(element.style.left).toBe('114px');
+    expect(element.style.top).toBe('40px');
+    expect(element.style.width).toBe('40px');
+    expect(element.style.height).toBe('40px');
+    expect(element.style.textAlign).toBe('center');
+    expect(parseFloat(element.style.left) + parseFloat(element.style.width) / 2).toBe(134);
+
+    const box = container.querySelector<HTMLElement>('.mm-editor-selection');
+    expect(box?.style.left).toBe('118px');
+    expect(box?.style.top).toBe('38px');
+    expect(box?.style.width).toBe('32px');
+    expect(box?.style.height).toBe('44px');
   });
 
   it('[TC-2-13-10] exits an unchanged field on Enter', () => {
