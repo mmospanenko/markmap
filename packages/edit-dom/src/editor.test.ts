@@ -3617,11 +3617,14 @@ describe('sibling multi-selection', () => {
 
   it('[TC-2-28-7] draws a frame around every selected sibling', () => {
     const { container, view, editor } = setup('- a\n- b\n- c\n');
+    view.rects.set(nodeId(editor, 'a'), { x: 10, y: 20, width: 100, height: 30 });
+    view.rects.set(nodeId(editor, 'c'), { x: 10, y: 70, width: 100, height: 30 });
     clickNode(container, view, nodeId(editor, 'a'));
     clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
 
     const frames = container.querySelectorAll<HTMLElement>('.mm-editor-selection');
     expect(Array.from(frames, (frame) => frame.style.display)).toEqual(['block', 'block']);
+    expect(Array.from(frames, (frame) => frame.style.top)).toEqual(['18px', '68px']);
 
     key(container, 'Escape');
     expect(container.querySelectorAll('.mm-editor-selection')).toHaveLength(1);
@@ -3748,7 +3751,25 @@ describe('sibling multi-selection', () => {
     expect(editor.selected).not.toBe(a);
   });
 
-  it('[TC-2-29-9] leaves a group move at the boundary unchanged', () => {
+  it('[TC-2-29-9] restores the post-delete fallback selection on redo', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'Backspace');
+    expect(editor.source).toBe('- a\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['a']);
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+
+    key(container, 'z', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['a']);
+    expect(editor.selected).toBe(nodeId(editor, 'a'));
+  });
+
+  it('[TC-2-29-10] leaves a group move at the boundary unchanged', () => {
     const { container, view, editor } = setup('- a\n- b\n- c\n');
     clickNode(container, view, nodeId(editor, 'a'));
     clickNode(container, view, nodeId(editor, 'b'), { metaKey: true });
@@ -3764,7 +3785,7 @@ describe('sibling multi-selection', () => {
     expect(editor.canUndo).toBe(false);
   });
 
-  it('[TC-2-29-10] reports a failed group move and keeps the document', () => {
+  it('[TC-2-29-11] reports a failed group move and keeps the document', () => {
     const source = '# A\n\n## B\n\n### C\n\n## D\n\n## F\n\n##### E\n';
     const { container, view, editor, errors } = setup(source);
     setLayout(container);

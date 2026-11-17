@@ -70,7 +70,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-26    | TC-2-26-1, TC-2-26-2                              |
 | REQ-2-27    | TC-2-27-1 ... TC-2-27-6                           |
 | REQ-2-28    | TC-2-28-1 ... TC-2-28-7                           |
-| REQ-2-29    | TC-2-29-1 ... TC-2-29-10                          |
+| REQ-2-29    | TC-2-29-1 ... TC-2-29-11                          |
 
 ## Decisions
 
