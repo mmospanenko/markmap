@@ -17,3 +17,6 @@ documents:
   - id: ADR-2
     title: A keyboard editor as an overlay over the SVG
     path: adr/0002-dom-editor.md
+  - id: ADR-3
+    title: Sibling range multi-selection over atomic batch commands
+    path: adr/0003-sibling-multi-select.md

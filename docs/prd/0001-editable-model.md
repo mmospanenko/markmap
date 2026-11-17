@@ -25,6 +25,8 @@ The projection is a validated snapshot of the tree over the original text. Comma
 - [REQ-1-15] When a document is built, the model shall expose one root policy computed from the parse result that names a source-heading root first, then a frontmatter-title root, then a synthetic root, reports title presence, body start and whether a direct heading child exists, and allows root-heading creation for a synthetic root with no direct top-level H1 child and for a title root with no direct heading child. A root-heading command shall insert one level-one heading at the first non-blank body line, preserve leading blank lines, separate following content with one blank line, keep every byte outside one splice and the file line ending, make the old top-level nodes its children, prove node count, order and parent edges through its own mapped offsets, and refuse a source root or an ineligible title or synthetic root without changing the document. A whitespace-only source shall keep every original byte and the file EOL with the heading appended, a truly empty source shall produce only the heading, and a BOM shall stay before the heading. A Setext source root shall stay label-editable and structurally opaque. Existing H3-H6 headings shall stay read and edited in place; a new branch under an H2-H6 root shall fall back to a list item under the REQ-1-3 cap.
 - [REQ-1-16] When a document is built, the model shall expose a content node count that excludes a synthetic or title root. Every structural command verification shall compare content counts: root creation and child or sibling insertion add one, paste adds the fragment content count, deletion subtracts the removed subtree, and label, notes, checkbox, outdent and move keep it unchanged.
 - [REQ-1-17] When a document has exactly one top-level heading at any level from one to six, the parser shall promote it to the root even when a non-empty frontmatter title exists, preserve its real depth, source label and block ranges, children and notes, keep Setext underline syntax, and ignore heading-like lines inside code and `markmap-note` fences. The title shall stay byte-for-byte in the frontmatter and shall supply the root label only when no promotion happens. The parse result shall expose title presence and the body start offset, which shall be the source length for an empty body. A promoted H3-H6 root shall keep its level and shall stay edited in place; a new child under an H2-H6 root shall be a list item under the REQ-1-3 cap.
+- [REQ-1-18] When a batch delete command names several sibling nodes, it shall remove each selected node's whole block with its descendants and notes, treat the set as one atomic command, keep every byte outside the removed blocks and the file line ending, and return the selection of the nearest previous unselected sibling before the first removed node or the parent when none remains. It shall reject an empty set, the root, a mixed-parent set, an opaque node or a node without a block without changing the input, and it shall verify that the content node count falls by every removed subtree.
+- [REQ-1-19] When a batch move command names several sibling nodes, a destination parent and an index, it shall move the selected blocks with their descendants, notes, markers and continuation lines as one contiguous block in their current order, change only the affected source ranges and the necessary heading levels and list indents for the destination, return the label selection of the first moved node, and reject an empty set, the root, a mixed-parent set, an opaque selected node or target, a cycle, an impossible heading level or an out-of-range index without changing the input. The index shall be the final position after every selected node is removed, the relative order and subtree content shall survive, and moving the set to its current position shall change no bytes.
 
 ## Acceptance tests
 
@@ -49,11 +51,13 @@ Tests carry `[TC-1-N-K]` names where `N` is the requirement number and `K` the c
 | REQ-1-15    | TC-1-15-1 ... TC-1-15-20 |
 | REQ-1-16    | TC-1-16-1 ... TC-1-16-4  |
 | REQ-1-17    | TC-1-17-1 ... TC-1-17-8  |
+| REQ-1-18    | TC-1-18-1 ... TC-1-18-6  |
+| REQ-1-19    | TC-1-19-1 ... TC-1-19-11 |
 
 ## Out of scope
 
 - Clipboard detection and transfer format; the app owns them.
-- Multi-select, saving fold state to Markdown.
+- Saving fold state to Markdown.
 - Publishing the fork to npm.
 
 The DOM layer is specified in [PRD-2](0002-dom-editor.md). Notes editing is specified in [PRD-3](0003-notes.md).
