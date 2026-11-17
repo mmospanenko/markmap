@@ -33,6 +33,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-23] When a synthetic root or a title root without heading children is eligible for creation, Space, a printable key and Enter shall open its label field; the label shall become a level-one heading in one history entry, snapshots shall include the draft while the field stays open, Escape and undo shall follow the session rules, the root selection frame shall stay visible for a non-empty synthetic root and hidden only for a truly empty document, and a title root with headings or a top-level H1 refusal shall report a notice without a source change. A title root with a single body heading is a source-heading root and edits in place without a notice. Root creation shall always insert H1 and shall never rewrite an existing H3-H6 heading. The root shall stay non-deletable.
 - [REQ-2-24] When a label draft changes, the editor shall report the current saveable source through `onDraftChange` after a successful preview, when a preview returns to the session baseline, and when editing is cancelled. It shall emit only when the saveable source actually changes: an unchanged cancel and a commit of an already-emitted draft shall add no duplicate draft event. `onChange` shall stay the committed-document channel; a host save acknowledgment of an older draft shall not clear a newer draft; Escape and undo shall keep the committed baseline resavable; and typing shall notify the host before the first snapshot.
 - [REQ-2-25] When an open label session loses its screen rect, the editor shall finish like Escape: restore the committed baseline and report that baseline once through `onDraftChange` when a different draft was emitted. It shall stay silent when nothing was emitted, on a file switch and on destroy, and a snapshot after the loss shall return the committed source.
+- [REQ-2-26] When the user types in an open label, the editor shall publish each saveable draft through `onDraftChange` immediately and apply at most one preview render per animation frame with the latest valid draft. A pending preview shall be flushed or cancelled before commit, cancel, source replacement or destroy and shall never overwrite the committed document; snapshots, focus and undo shall keep the latest text.
 
 ## Acceptance tests
 
@@ -63,6 +64,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-23    | TC-2-23-1 ... TC-2-23-10                          |
 | REQ-2-24    | TC-2-24-1 ... TC-2-24-3, TC-2-24-5 ... TC-2-24-11 |
 | REQ-2-25    | TC-2-25-1 ... TC-2-25-3                           |
+| REQ-2-26    | TC-2-26-1, TC-2-26-2                              |
 
 ## Decisions
 
@@ -99,6 +101,7 @@ Transitions:
 - Committing changed text applies once and calls `onChange`. It adds no baseline draft event.
 - `setSource` and history restores end the label session without a draft event; history restores still emit `onChange`. `destroy` is silent.
 - A label `snapshot()` is a pure read and never emits or changes history. A notes `snapshot()` still commits the notes and records history as before.
+- Label previews are scheduled once per animation frame. `onDraftChange`, snapshots and commit read the latest synchronous draft; the frame draws only the latest valid draft and is cancelled when the session ends.
 
 ## Migration
 

@@ -209,6 +209,7 @@ export class MarkmapEditor {
   private notes: NotesEditing | null = null;
   private drag: DragState | null = null;
   private suppressClick = false;
+  private previewFrame: number | null = null;
   private previewing = false;
   private destroyed = false;
 
@@ -495,6 +496,7 @@ export class MarkmapEditor {
     this.container.removeEventListener('pointerdown', this.handlePointerDown, true);
     this.container.removeEventListener('mousedown', this.handleMouseDown, true);
     this.field.removeEventListener('input', this.handleInput);
+    this.cancelPreview();
     this.cancelDrag();
     this.closeNotes(false);
     this.layer.remove();
@@ -1592,7 +1594,6 @@ export class MarkmapEditor {
       this.restorePreview(editing, true);
       return;
     }
-    const folds = this.captureFolds(this.doc);
     try {
       const result = applyCommand(
         this.doc,
@@ -1600,18 +1601,9 @@ export class MarkmapEditor {
           ? { type: 'createRootHeading', node: editing.nodeId, text }
           : { type: 'setLabel', node: editing.nodeId, text },
       );
-      this.previewing = true;
-      try {
-        this.view.setTree(result.tree);
-        this.restoreFolds(folds, result);
-      } finally {
-        this.previewing = false;
-      }
-      const target = nodeAtOffset(result.document, result.selection);
-      editing.previewId = target?.id ?? editing.previewId;
-      editing.preview = true;
       editing.draft = result;
       editing.draftText = text;
+      this.schedulePreview();
       const source = result.document.source;
       if (source === this.doc.source) {
         const emitted = editing.emitted;
@@ -1626,11 +1618,44 @@ export class MarkmapEditor {
         });
       }
     } catch {
-      this.previewing = false;
+      return;
     }
   }
 
+  private schedulePreview(): void {
+    if (this.previewFrame !== null) return;
+    this.previewFrame = window.requestAnimationFrame(this.renderPreview);
+  }
+
+  private cancelPreview(): void {
+    if (this.previewFrame === null) return;
+    window.cancelAnimationFrame(this.previewFrame);
+    this.previewFrame = null;
+  }
+
+  private renderPreview = (): void => {
+    this.previewFrame = null;
+    const editing = this.editing;
+    if (!editing || !editing.draft) return;
+    const result = editing.draft;
+    const folds = this.captureFolds(this.doc);
+    this.previewing = true;
+    try {
+      this.view.setTree(result.tree);
+      this.restoreFolds(folds, result);
+    } finally {
+      this.previewing = false;
+    }
+    const target = nodeAtOffset(result.document, result.selection);
+    editing.previewId = target?.id ?? editing.previewId;
+    editing.preview = true;
+    this.positionEditing();
+    this.paintSelection();
+    this.paintEditing();
+  };
+
   private restorePreview(editing: Editing, notifyBaseline = false): void {
+    this.cancelPreview();
     if (editing.preview) {
       const parsed = parseDocument(this.doc.source);
       this.previewing = true;
@@ -1673,6 +1698,7 @@ export class MarkmapEditor {
 
   private stopEditingUi(restore = true): void {
     if (!this.editing) return;
+    this.cancelPreview();
     if (restore) this.restorePreview(this.editing);
     this.editing.field.style.display = 'none';
     this.editing = null;
