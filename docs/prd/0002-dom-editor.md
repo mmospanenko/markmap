@@ -8,7 +8,7 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 
 ## Requirements
 
-- [REQ-2-1] When the editor starts and when the user clicks a node, the editor shall select it, highlight its SVG group and keep the root selected by default.
+- [REQ-2-1] When the editor starts and when the user clicks a node, the editor shall select it, highlight its SVG group and keep the root selected by default. A click on empty map space shall clear the selection, the highlight and the frame, and blur the editor surface; a later node click shall select again and focus the editor surface.
 - [REQ-2-2] When the user presses Enter or Tab on a selected node, the editor shall insert a sibling or child with a placeholder label, select it and start editing. The created branch shall follow the REQ-1-3 heading cap: an H1 root or heading creates H2, an H2 or deeper heading creates a list item under itself for a child or under its parent heading for a sibling, and the selected node shall be the created branch with its real kind.
 - [REQ-2-3] When editing ends, the editor shall commit with Enter, Tab or a click elsewhere, cancel with Escape, reject line breaks in heading labels and keep the field open when a label is invalid.
 - [REQ-2-4] When the user presses Shift+Tab or Delete, the editor shall outdent or remove the selected node through the core commands. When the open field of a newly inserted node is empty, Backspace or Delete shall remove that node and select the node before it.
@@ -33,12 +33,14 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-23] When a synthetic root or a title root without heading children is eligible for creation, Space, a printable key and Enter shall open its label field; the label shall become a level-one heading in one history entry, snapshots shall include the draft while the field stays open, Escape and undo shall follow the session rules, the root selection frame shall stay visible for a non-empty synthetic root and hidden only for a truly empty document, and a title root with headings or a top-level H1 refusal shall report a notice without a source change. A title root with a single body heading is a source-heading root and edits in place without a notice. Root creation shall always insert H1 and shall never rewrite an existing H3-H6 heading. The root shall stay non-deletable.
 - [REQ-2-24] When a label draft changes, the editor shall report the current saveable source through `onDraftChange` after a successful preview, when a preview returns to the session baseline, and when editing is cancelled. It shall emit only when the saveable source actually changes: an unchanged cancel and a commit of an already-emitted draft shall add no duplicate draft event. `onChange` shall stay the committed-document channel; a host save acknowledgment of an older draft shall not clear a newer draft; Escape and undo shall keep the committed baseline resavable; and typing shall notify the host before the first snapshot.
 - [REQ-2-25] When an open label session loses its screen rect, the editor shall finish like Escape: restore the committed baseline and report that baseline once through `onDraftChange` when a different draft was emitted. It shall stay silent when nothing was emitted, on a file switch and on destroy, and a snapshot after the loss shall return the committed source.
+- [REQ-2-26] When the user types in an open label, the editor shall publish each saveable draft through `onDraftChange` immediately and apply at most one preview render per animation frame with the latest valid draft. A pending preview shall be flushed or cancelled before commit, cancel, source replacement or destroy and shall never overwrite the committed document; snapshots, focus and undo shall keep the latest text.
+- [REQ-2-27] When a label commit follows a valid preview for the same field text and document base, the editor shall reuse that preview result without re-planning the command and shall skip a view tree render whose source the view already draws. A draft invalidated by another command shall be recomputed against the current document, shall clear its preview flag and re-anchor the field to the committed node before the committed tree is drawn, and a pending preview frame shall not draw it; cancel and source replacement shall leave the committed source and its rendered tree intact; destroy shall cancel pending work and leave the committed source intact without drawing a draft, and the host then destroys the view; undo and redo shall restore exact sources; and the Tab commit shall reuse the draft and record one history entry. Label snapshots shall stay pure and return the current saveable source, and `onDraftChange` shall stay synchronous.
 
 ## Acceptance tests
 
 | Requirement | Tests                                             |
 | ----------- | ------------------------------------------------- |
-| REQ-2-1     | TC-2-1-1, TC-2-1-2                                |
+| REQ-2-1     | TC-2-1-1 ... TC-2-1-4                             |
 | REQ-2-2     | TC-2-2-1 ... TC-2-2-9                             |
 | REQ-2-3     | TC-2-3-1 ... TC-2-3-3                             |
 | REQ-2-4     | TC-2-4-1 ... TC-2-4-8                             |
@@ -63,6 +65,8 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-23    | TC-2-23-1 ... TC-2-23-10                          |
 | REQ-2-24    | TC-2-24-1 ... TC-2-24-3, TC-2-24-5 ... TC-2-24-11 |
 | REQ-2-25    | TC-2-25-1 ... TC-2-25-3                           |
+| REQ-2-26    | TC-2-26-1, TC-2-26-2                              |
+| REQ-2-27    | TC-2-27-1 ... TC-2-27-6                           |
 
 ## Decisions
 
@@ -84,21 +88,23 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 
 ## Label session state
 
-An open label session owns five values:
+An open label session owns six values:
 
 - `doc`: the committed document. Only a committed command changes it.
 - `draft`: the latest valid preview `EditResult`. It never changes `doc`, history or redo.
-- `draftText`: the exact field text that produced `draft`. The draft is current only while it matches the field.
+- `draftText`: the exact field text that produced `draft`.
+- `draftBase`: the committed source that produced `draft`. The draft is current only while `draftText` matches the field and `draftBase` matches `doc`.
 - `emitted`: the saveable draft source last reported through `onDraftChange`, or `null` after the baseline is reported.
-- `preview`: whether the view draws the draft instead of the committed document.
+- `preview`: whether the view draws the draft instead of the committed document. Another command that draws the committed tree clears it and anchors the field to the committed node.
 
 Transitions:
 
 - A successful preview whose saveable source differs calls `onDraftChange`; an identical preview and a repeated identical input publish nothing.
 - Returning to the baseline, cancelling or losing the rect reports the committed source through `onDraftChange` only when a different draft was emitted. A lost rect behaves exactly like cancel.
-- Committing changed text applies once and calls `onChange`. It adds no baseline draft event.
-- `setSource` and history restores end the label session without a draft event; history restores still emit `onChange`. `destroy` is silent.
-- A label `snapshot()` is a pure read and never emits or changes history. A notes `snapshot()` still commits the notes and records history as before.
+- Committing changed text applies once and calls `onChange`. It adds no baseline draft event. A current draft reuses its preview result; a stale draft is recomputed against the current document, and the commit redraws only a source the view does not already show.
+- `setSource` and history restores end the label session without a draft event; history restores still emit `onChange`. `destroy` is silent and does not restore the preview; the host discards the view.
+- A label `snapshot()` is a pure read and never emits or changes history. It returns the current draft source, recomputes a stale draft without publishing it, returns the last reported draft source for invalid text on the same base, and falls back to the committed source when the base is stale. A notes `snapshot()` still commits the notes and records history as before.
+- Label previews are scheduled once per animation frame. `onDraftChange`, snapshots and commit read the latest synchronous draft; the frame draws only the latest valid draft for the current document and is cancelled when the session ends.
 
 ## Migration
 

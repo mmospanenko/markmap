@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { MarkmapNode, Rect, Side } from '@markmap/core';
-import { labelText, notesText, type Document } from '@markmap/model';
+import { labelText, notesText, parseDocument, type Document } from '@markmap/model';
 import { softTheme } from '@markmap/render';
 import type { Markmap } from '@markmap/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -106,6 +106,7 @@ function setup(source = '- a\n- b\n', options: Partial<MarkmapEditorOptions> = {
   const container = document.createElement('div');
   document.body.append(container);
   const view = new FakeView();
+  view.tree = parseDocument(source).tree;
   const changes: Array<{ source: string; selection: number; document: Document }> = [];
   const drafts: Array<{ source: string; selection: number; document: Document }> = [];
   const errors: Error[] = [];
@@ -171,6 +172,21 @@ function type(container: HTMLElement, value: string) {
   const element = field(container);
   element.value = value;
   element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function captureFrames() {
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+  return {
+    frames,
+    flush() {
+      for (const frame of frames.splice(0)) frame(0);
+    },
+  };
 }
 
 function pointer(
@@ -288,6 +304,43 @@ describe('MarkmapEditor', () => {
         .querySelector(`[data-key="node:${id}"]`)
         ?.classList.contains('mm-editor-selected'),
     ).toBe(true);
+  });
+
+  it('[TC-2-1-4] clears selection and focus on an empty canvas click and restores both on a node click', () => {
+    const { container, view, editor } = setup();
+    const b = nodeId(editor, 'b');
+    clickNode(container, view, b);
+    expect(editor.selected).toBe(b);
+    expect(document.activeElement).toBe(container);
+
+    view.hit = { kind: 'action', nodeId: b };
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBe(b);
+
+    view.hit = { kind: 'toggle', nodeId: b };
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBe(b);
+
+    view.hit = undefined;
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selected).toBeNull();
+    expect(view.element.querySelector('.mm-editor-selected')).toBeNull();
+    expect(container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'none',
+    );
+    expect(document.activeElement).not.toBe(container);
+
+    clickNode(container, view, b);
+    expect(editor.selected).toBe(b);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${b}"]`)
+        ?.classList.contains('mm-editor-selected'),
+    ).toBe(true);
+    expect(container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'block',
+    );
+    expect(document.activeElement).toBe(container);
   });
 
   it('[TC-2-2-1] inserts a sibling and starts editing', () => {
@@ -849,9 +902,11 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-1] previews the label in the view while typing', () => {
     const { container, view, editor, changes } = setup();
+    const frames = captureFrames();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'a much longer label');
+    frames.flush();
     expect(treeLabel(view.tree?.children[0])).toBe('a much longer label');
     expect(editor.source).toBe('- a\n- b\n');
     expect(changes).toHaveLength(0);
@@ -859,9 +914,11 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-2] restores the layout when editing is cancelled', () => {
     const { container, view, editor } = setup();
+    const frames = captureFrames();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'a much longer label');
+    frames.flush();
     key(field(container), 'Escape');
     expect(treeLabel(view.tree?.children[0])).toBe('a');
     expect(editor.isEditing).toBe(false);
@@ -870,9 +927,11 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-3] keeps one change after previewing a label', () => {
     const { container, view, editor, changes } = setup();
+    const frames = captureFrames();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'a much longer label');
+    frames.flush();
     editor.commit();
     expect(editor.source).toBe('- a much longer label\n- b\n');
     expect(changes).toHaveLength(1);
@@ -881,9 +940,11 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-4] restores the preview when the text returns to the original', () => {
     const { container, view, editor } = setup();
+    const frames = captureFrames();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'a much longer label');
+    frames.flush();
     type(container, 'a');
     expect(treeLabel(view.tree?.children[0])).toBe('a');
     expect(editor.source).toBe('- a\n- b\n');
@@ -891,8 +952,10 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-5] previews the first heading in an empty document', () => {
     const { container, view, editor, changes } = setup('');
+    const frames = captureFrames();
     key(container, ' ');
     type(container, 'First note');
+    frames.flush();
     expect(treeLabel(view.tree)).toBe('First note');
     expect(editor.source).toBe('');
     expect(changes).toHaveLength(0);
@@ -900,13 +963,90 @@ describe('MarkmapEditor', () => {
 
   it('[TC-2-16-6] keeps the last valid preview for an invalid label', () => {
     const { container, view, editor } = setup('# a\n');
+    const frames = captureFrames();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'ab');
     type(container, 'a\nb');
+    frames.flush();
     expect(treeLabel(view.tree)).toBe('ab');
     expect(editor.isEditing).toBe(true);
     expect(editor.source).toBe('# a\n');
+  });
+
+  it('[TC-2-26-1] coalesces input previews into one frame with the latest label', () => {
+    const { container, view, editor, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'one');
+    type(container, 'two');
+    type(container, 'three');
+
+    expect(document.activeElement).toBe(field(container));
+    expect(drafts.map((change) => change.source)).toEqual([
+      '- one\n- b\n',
+      '- two\n- b\n',
+      '- three\n- b\n',
+    ]);
+    expect(editor.snapshot()).toBe('- three\n- b\n');
+    expect(setTree).not.toHaveBeenCalled();
+    expect(frames.frames).toHaveLength(1);
+
+    const frame = frames.frames[0];
+    if (frame) frame(0);
+    expect(setTree).toHaveBeenCalledTimes(1);
+    expect(treeLabel(view.tree?.children[0])).toBe('three');
+
+    editor.commit();
+    expect(editor.source).toBe('- three\n- b\n');
+  });
+
+  it('[TC-2-26-2] discards a pending preview on commit, cancel, source replacement and destroy', () => {
+    const frames = captureFrames();
+
+    const committed = setup();
+    clickNode(committed.container, committed.view, nodeId(committed.editor, 'a'));
+    key(committed.container, ' ');
+    type(committed.container, 'draft');
+    expect(frames.frames).toHaveLength(1);
+    committed.editor.commit();
+    const first = frames.frames[0];
+    if (first) first(0);
+    expect(committed.editor.source).toBe('- draft\n- b\n');
+    expect(treeLabel(committed.view.tree?.children[0])).toBe('draft');
+
+    const switched = setup();
+    clickNode(switched.container, switched.view, nodeId(switched.editor, 'a'));
+    key(switched.container, ' ');
+    type(switched.container, 'stale');
+    const second = frames.frames[1];
+    switched.editor.setSource('- z\n');
+    if (second) second(0);
+    expect(switched.editor.source).toBe('- z\n');
+    expect(treeLabel(switched.view.tree?.children[0])).toBe('z');
+
+    const cancelled = setup();
+    clickNode(cancelled.container, cancelled.view, nodeId(cancelled.editor, 'a'));
+    key(cancelled.container, ' ');
+    type(cancelled.container, 'hidden');
+    const third = frames.frames[2];
+    key(field(cancelled.container), 'Escape');
+    if (third) third(0);
+    expect(cancelled.editor.source).toBe('- a\n- b\n');
+    expect(cancelled.editor.isEditing).toBe(false);
+    expect(treeLabel(cancelled.view.tree?.children[0])).toBe('a');
+
+    const destroyed = setup();
+    clickNode(destroyed.container, destroyed.view, nodeId(destroyed.editor, 'a'));
+    key(destroyed.container, ' ');
+    type(destroyed.container, 'gone');
+    const fourth = frames.frames[3];
+    destroyed.editor.destroy();
+    if (fourth) fourth(0);
+    expect(destroyed.editor.source).toBe('- a\n- b\n');
+    expect(treeLabel(destroyed.view.tree?.children[0])).toBe('a');
   });
 
   it('[TC-2-18-1] snapshots the current label without leaving editing', () => {
@@ -977,6 +1117,190 @@ describe('MarkmapEditor', () => {
     expect(container.hasAttribute('tabindex')).toBe(false);
     clickNode(container, view, nodeId(editor, 'a'));
     expect(editor.selected).toBeNull();
+  });
+});
+
+describe('Commit path', () => {
+  it('[TC-2-27-1] reuses the current preview and skips a redraw on commit', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    frames.flush();
+    const draft = drafts.at(-1);
+    if (!draft) throw new Error('No draft');
+    expect(setTree).toHaveBeenCalledTimes(1);
+
+    editor.commit();
+
+    expect(editor.source).toBe('- draft\n- b\n');
+    expect(setTree).toHaveBeenCalledTimes(1);
+    expect(changes.at(-1)?.document).toBe(draft.document);
+    expect(editor.isEditing).toBe(false);
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.redo()).toBe(true);
+    expect(editor.source).toBe('- draft\n- b\n');
+  });
+
+  it('[TC-2-27-2] recomputes a draft invalidated by another command', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    const stale = drafts.at(-1);
+    if (!stale) throw new Error('No draft');
+
+    expect(editor.setLabel(nodeId(editor, 'b'), 'changed')).toBe(true);
+    frames.flush();
+    expect(treeLabel(view.tree?.children[0])).toBe('a');
+    expect(treeLabel(view.tree?.children[1])).toBe('changed');
+    expect(editor.snapshot()).toBe('- draft\n- changed\n');
+    expect(editor.source).toBe('- a\n- changed\n');
+
+    key(field(container), 'Enter');
+
+    expect(editor.source).toBe('- draft\n- changed\n');
+    expect(changes.at(-1)?.document).not.toBe(stale.document);
+    expect(treeLabel(view.tree?.children[0])).toBe('draft');
+    expect(treeLabel(view.tree?.children[1])).toBe('changed');
+
+    const rendered = setup();
+    const renderedFrames = captureFrames();
+    const setTree = vi.spyOn(rendered.view, 'setTree');
+    clickNode(rendered.container, rendered.view, nodeId(rendered.editor, 'a'));
+    key(rendered.container, ' ');
+    type(rendered.container, 'draft');
+    renderedFrames.flush();
+    expect(treeLabel(rendered.view.tree?.children[0])).toBe('draft');
+    const drawn = setTree.mock.calls.length;
+
+    expect(rendered.editor.setLabel(nodeId(rendered.editor, 'b'), 'changed')).toBe(true);
+    expect(treeLabel(rendered.view.tree?.children[0])).toBe('a');
+    expect(rendered.editor.isEditing).toBe(true);
+    key(field(rendered.container), 'Escape');
+    expect(setTree).toHaveBeenCalledTimes(drawn + 1);
+    expect(treeLabel(rendered.view.tree?.children[0])).toBe('a');
+    expect(treeLabel(rendered.view.tree?.children[1])).toBe('changed');
+    expect(rendered.editor.source).toBe('- a\n- changed\n');
+    expect(rendered.editor.isEditing).toBe(false);
+  });
+
+  it('[TC-2-27-3] commits a pending preview without a late overwrite', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    const draft = drafts.at(-1);
+    if (!draft) throw new Error('No draft');
+    expect(setTree).not.toHaveBeenCalled();
+    const pending = frames.frames[0];
+
+    editor.commit();
+
+    expect(editor.source).toBe('- draft\n- b\n');
+    expect(changes.at(-1)?.document).toBe(draft.document);
+    expect(setTree).toHaveBeenCalledTimes(1);
+
+    if (pending) pending(0);
+    expect(setTree).toHaveBeenCalledTimes(1);
+    expect(treeLabel(view.tree?.children[0])).toBe('draft');
+    expect(editor.isEditing).toBe(false);
+  });
+
+  it('[TC-2-27-4] keeps cancel, source replacement and destroy correct after a rendered preview', () => {
+    const frames = captureFrames();
+
+    const cancelled = setup();
+    const cancelTree = vi.spyOn(cancelled.view, 'setTree');
+    clickNode(cancelled.container, cancelled.view, nodeId(cancelled.editor, 'a'));
+    key(cancelled.container, ' ');
+    type(cancelled.container, 'draft');
+    frames.flush();
+    key(field(cancelled.container), 'Escape');
+    expect(treeLabel(cancelled.view.tree?.children[0])).toBe('a');
+    key(cancelled.container, ' ');
+    type(cancelled.container, 'draft');
+    cancelled.editor.commit();
+    expect(cancelled.editor.source).toBe('- draft\n- b\n');
+    expect(treeLabel(cancelled.view.tree?.children[0])).toBe('draft');
+    expect(cancelTree).toHaveBeenCalledTimes(3);
+
+    const switched = setup();
+    const switchTree = vi.spyOn(switched.view, 'setTree');
+    clickNode(switched.container, switched.view, nodeId(switched.editor, 'a'));
+    key(switched.container, ' ');
+    type(switched.container, 'draft');
+    frames.flush();
+    switched.editor.setSource('- z\n');
+    clickNode(switched.container, switched.view, nodeId(switched.editor, 'z'));
+    key(switched.container, ' ');
+    type(switched.container, 'w');
+    switched.editor.commit();
+    expect(switched.editor.source).toBe('- w\n');
+    expect(treeLabel(switched.view.tree?.children[0])).toBe('w');
+    expect(switchTree).toHaveBeenCalledTimes(3);
+
+    const destroyed = setup();
+    const destroyTree = vi.spyOn(destroyed.view, 'setTree');
+    clickNode(destroyed.container, destroyed.view, nodeId(destroyed.editor, 'a'));
+    key(destroyed.container, ' ');
+    type(destroyed.container, 'draft');
+    frames.flush();
+    type(destroyed.container, 'gone');
+    const pending = frames.frames.at(-1);
+    destroyed.editor.destroy();
+    if (pending) pending(0);
+    expect(destroyed.editor.source).toBe('- a\n- b\n');
+    expect(destroyTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('[TC-2-27-5] reuses the draft for a Tab commit and records one history entry', () => {
+    const { container, view, editor, changes, drafts } = setup();
+    const frames = captureFrames();
+    const setTree = vi.spyOn(view, 'setTree');
+    clickNode(container, view, nodeId(editor, 'a'));
+    key(container, ' ');
+    type(container, 'draft');
+    frames.flush();
+    const draft = drafts.at(-1);
+    if (!draft) throw new Error('No draft');
+
+    key(field(container), 'Tab');
+
+    expect(editor.source).toBe('- draft\n  - New topic\n- b\n');
+    expect(changes[0]?.document).toBe(draft.document);
+    expect(setTree).toHaveBeenCalledTimes(2);
+    expect(editor.isEditing).toBe(true);
+    expect(field(container).value).toBe('New topic');
+
+    key(field(container), 'Escape');
+    expect(editor.undo()).toBe(true);
+    expect(editor.source).toBe('- a\n- b\n');
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-27-6] never returns a stale draft source after another command', () => {
+    const { container, view, editor, errors } = setup('# A\n\n- b\n');
+    clickNode(container, view, editor.document.root);
+    key(container, ' ');
+    type(container, 'AB');
+    expect(editor.snapshot()).toBe('# AB\n\n- b\n');
+    expect(editor.setLabel(nodeId(editor, 'b'), 'changed')).toBe(true);
+
+    type(container, 'A\nB');
+
+    expect(editor.snapshot()).toBe('# A\n\n- changed\n');
+    expect(editor.source).toBe('# A\n\n- changed\n');
+    key(field(container), 'Enter');
+    expect(editor.source).toBe('# A\n\n- changed\n');
+    expect(editor.isEditing).toBe(true);
+    expect(errors.at(-1)?.message).toContain('line break');
   });
 });
 
@@ -1134,6 +1458,43 @@ describe('MarkmapEditor edges', () => {
     view.labels.set(root, { ...label, align: 'end' });
     view.emit('render');
     expect(field.style.textAlign).toBe('right');
+  });
+
+  it('[TC-4-5-3] centers an empty topic field on its visible block', () => {
+    const { container, view, editor } = setup('# Root\n', { placeholder: '\u200B' });
+    key(container, 'Enter');
+    const topic = selectedId(editor);
+    expect(field(container).value).toBe('');
+    view.rects.set(topic, { x: 120, y: 40, width: 28, height: 40 });
+    view.directions.set(topic, 'right');
+    view.labels.set(topic, {
+      font: {
+        family: 'Inter, sans-serif',
+        size: 16,
+        weight: 500,
+        style: 'normal',
+        lineHeight: 22,
+      },
+      fill: '#2b3138',
+      padding: [9, 14, 9, 14],
+      align: 'center',
+    });
+    view.emit('render');
+
+    const element = field(container);
+    expect(element.style.padding).toBe('9px 14px');
+    expect(element.style.left).toBe('114px');
+    expect(element.style.top).toBe('40px');
+    expect(element.style.width).toBe('40px');
+    expect(element.style.height).toBe('40px');
+    expect(element.style.textAlign).toBe('center');
+    expect(parseFloat(element.style.left) + parseFloat(element.style.width) / 2).toBe(134);
+
+    const box = container.querySelector<HTMLElement>('.mm-editor-selection');
+    expect(box?.style.left).toBe('118px');
+    expect(box?.style.top).toBe('38px');
+    expect(box?.style.width).toBe('32px');
+    expect(box?.style.height).toBe('44px');
   });
 
   it('[TC-2-13-10] exits an unchanged field on Enter', () => {
@@ -2226,9 +2587,11 @@ describe('Draft notifications', () => {
 describe('Session completion', () => {
   it('[TC-2-25-1] publishes the baseline when the edited node loses its rect', () => {
     const { container, view, editor, drafts } = setup('- a\n- b\n');
+    const frames = captureFrames();
     clickNode(container, view, nodeId(editor, 'a'));
     key(container, ' ');
     type(container, 'draft');
+    frames.flush();
     expect(drafts.map((change) => change.source)).toEqual(['- draft\n- b\n']);
     const preview = view.tree?.children.find((child) => treeLabel(child) === 'draft');
     if (!preview) throw new Error('No draft node');

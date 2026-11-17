@@ -3,9 +3,9 @@ import { validators } from '@markmap/core';
 import { type BranchColorOptions, branchColors, branchIndex, DEFAULT_COLORS } from './branch';
 import { alignFor, CODE_FONT, CONTENT_TOKENS, DARK_CONTENT_TOKENS, SYSTEM_FONT } from './shared';
 
-const LIGHT_COLORS = ['#dc7768', '#9c6c9d', '#7369a1', '#cb9c40', '#77a76b', '#6c95bd'];
+const LIGHT_COLORS = ['#4a7fa8', '#5f8b4c', '#8a6aa8', '#b08434', '#3f8f8a', '#b45f6a'];
 
-const DARK_COLORS = ['#e39487', '#c08bb6', '#9b93c9', '#dbb76c', '#93c287', '#86aed0'];
+const DARK_COLORS = ['#7fb2e0', '#9dc98a', '#b39ad8', '#dbb76c', '#6fc6bb', '#e08ba8'];
 
 const LIGHT_TEXT = '#2b3138';
 const DARK_TEXT = '#e8edf4';
