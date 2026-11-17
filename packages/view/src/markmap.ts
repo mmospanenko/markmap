@@ -21,6 +21,7 @@ import {
   resolveRenderOptions,
   themeCSS,
   type ColorScheme,
+  type RenderGroup,
 } from '@markmap/render';
 import { select, type Selection } from 'd3-selection';
 import { zoom, type ZoomBehavior, zoomIdentity, type ZoomTransform, zoomTransform } from 'd3-zoom';
@@ -623,6 +624,7 @@ export class Markmap {
         toggles,
         toggleRadius: TOGGLE_RADIUS,
         nodes: frame.nodes.map((item) => ({ nodeId: item.node.id, rect: item.rect })),
+        groups: (frame.groups ?? []).map((item) => ({ groupId: item.id, rect: item.rect })),
         include: (id) => result.layout.byId.has(id),
       });
       this.hits = { frame, index };
@@ -702,6 +704,30 @@ export class Markmap {
       y: svgRect.y + t.applyY(rect.y),
       width: rect.width * t.k,
       height: rect.height * t.k,
+    };
+  }
+
+  setGroups(groups: RenderGroup[]): void {
+    this.viewOptions = { ...this.viewOptions, groups };
+    this.render();
+  }
+
+  get groups(): readonly RenderGroup[] {
+    return this.viewOptions.groups ?? [];
+  }
+
+  groupScreenRect(id: string | number): Rect | undefined {
+    const group = this.frame?.groups?.find(
+      (g, i) => g.id === String(id) || g.id === `group-${id}` || i === Number(id),
+    );
+    if (!group) return undefined;
+    const svgRect = this.element.getBoundingClientRect();
+    const t = this.transform;
+    return {
+      x: svgRect.x + t.applyX(group.rect.x),
+      y: svgRect.y + t.applyY(group.rect.y),
+      width: group.rect.width * t.k,
+      height: group.rect.height * t.k,
     };
   }
 

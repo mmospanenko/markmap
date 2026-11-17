@@ -32,6 +32,7 @@ export function createEditView(mm: Markmap): EditView {
     toggle: (id) => mm.toggle(id),
     focusNode: (id, options) => mm.focusNode(id, options),
     screenRect: (id) => mm.screenRect(id),
+    groupScreenRect: (id) => mm.groupScreenRect(id),
     direction: (id) => mm.result?.layout.byId.get(id)?.direction,
     labelStyle: (id): EditLabelStyle | undefined => {
       const result = mm.result;

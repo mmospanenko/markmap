@@ -30,6 +30,12 @@ import { defaultContentPlugins } from './default-plugins';
 import { layoutText, type TextLayout, transformContent } from './text';
 import { classicTheme } from './themes/classic';
 
+export interface RenderGroup {
+  id?: string;
+  roots: readonly string[];
+  label?: string | null;
+}
+
 export interface RenderOptions {
   measurer: Measurer;
   theme?: Theme;
@@ -43,6 +49,7 @@ export interface RenderOptions {
   siblingGap?: number;
   /** Inline content renderers. Defaults to {@link defaultContentPlugins}. */
   plugins?: readonly ContentPlugin[];
+  groups?: readonly RenderGroup[];
 }
 
 export interface RenderResult {
@@ -142,6 +149,36 @@ export function measureTree(
   return result;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isRenderGroup(value: unknown): value is RenderGroup {
+  if (!isRecord(value)) return false;
+  return isStringArray(value['roots']);
+}
+
+function readGroups(data: Record<string, unknown>): readonly RenderGroup[] {
+  const groups = data['groups'];
+  if (!Array.isArray(groups)) return [];
+  return groups.filter(isRenderGroup);
+}
+
+function groupPadding(layoutName: string | undefined): {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+} {
+  if (layoutName === 'org-chart') return { top: 16, right: 16, bottom: 20, left: 16 };
+  if (layoutName === 'two-sided') return { top: 14, right: 20, bottom: 14, left: 20 };
+  return { top: 14, right: 20, bottom: 14, left: 16 };
+}
+
 /** Measure, lay out and draw a tree as backend-neutral primitives. */
 export function renderTree(root: MarkmapNode, options: RenderOptions): RenderResult {
   const theme = options.theme ?? classicTheme;
@@ -176,6 +213,45 @@ export function renderTree(root: MarkmapNode, options: RenderOptions): RenderRes
     siblingGap: options.siblingGap,
   });
 
+  const rawGroups = options.groups ?? readGroups(root.data);
+  const pad = groupPadding(options.layout?.name);
+  const drawGroups: DrawGroup[] = [];
+  rawGroups.forEach((group, index) => {
+    if (group.roots.length === 0) return;
+    const isHidden = group.roots.some((r) => {
+      const p = paths.get(r);
+      return !p || p.some((id) => options.folded?.has(id));
+    });
+    if (isHidden) return;
+    const groupNodes = layout.nodes.filter((item) => {
+      const path = paths.get(item.node.id);
+      return path !== undefined && group.roots.some((r) => path.includes(r));
+    });
+    if (groupNodes.length === 0) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const node of groupNodes) {
+      if (node.rect.x < minX) minX = node.rect.x;
+      if (node.rect.y < minY) minY = node.rect.y;
+      if (node.rect.x + node.rect.width > maxX) maxX = node.rect.x + node.rect.width;
+      if (node.rect.y + node.rect.height > maxY) maxY = node.rect.y + node.rect.height;
+    }
+    const rect: Rect = {
+      x: minX - pad.left,
+      y: minY - pad.top,
+      width: maxX - minX + pad.left + pad.right,
+      height: maxY - minY + pad.top + pad.bottom,
+    };
+    drawGroups.push({
+      id: group.id ?? `group-${index}`,
+      roots: [...group.roots],
+      label: group.label ?? null,
+      rect,
+    });
+  });
+
   const state: DrawState = {
     nodes: layout.nodes.map((item) => {
       const ctx = contextOf(item);
@@ -198,6 +274,7 @@ export function renderTree(root: MarkmapNode, options: RenderOptions): RenderRes
         presence: 1,
       };
     }),
+    groups: drawGroups,
   };
   const primitives = drawState(state, theme);
   const bounds = unionRects([layout.bounds, primitiveBounds(primitives)]);
@@ -231,9 +308,17 @@ export interface DrawNode extends FrameNode {
   label?: ResolvedLabelStyle;
 }
 
+export interface DrawGroup {
+  id: string;
+  roots: string[];
+  label: string | null;
+  rect: Rect;
+}
+
 /** Everything needed to draw one frame. Parents come before their children. */
 export interface DrawState {
   nodes: DrawNode[];
+  groups?: DrawGroup[];
 }
 
 /**
@@ -242,6 +327,50 @@ export interface DrawState {
  * moves edges along with them.
  */
 export function drawState(state: DrawState, theme: Theme): Primitive[] {
+  const underlays: Primitive[] = (state.groups ?? []).map((group) => {
+    const children: Primitive[] = [
+      {
+        kind: 'rect',
+        x: group.rect.x,
+        y: group.rect.y,
+        w: group.rect.width,
+        h: group.rect.height,
+        r: 8,
+        fill: 'var(--mm-group-fill)',
+        stroke: 'var(--mm-group-border)',
+        strokeWidth: 1.5,
+      },
+    ];
+    if (group.label) {
+      children.push({
+        kind: 'text',
+        x: group.rect.x + 8,
+        y: group.rect.y - 6,
+        runs: [
+          {
+            text: group.label,
+            x: 0,
+            y: 0,
+            font: {
+              family: theme.font.family,
+              size: 12,
+              weight: 600,
+              style: 'normal',
+              lineHeight: 14,
+            },
+            fill: 'var(--mm-text)',
+          },
+        ],
+      });
+    }
+    return {
+      kind: 'group',
+      key: `group:${group.id}`,
+      groupId: group.id,
+      bounds: expandRect(group.rect, BOUNDS_MARGIN),
+      children,
+    };
+  });
   const byId = new Map(state.nodes.map((item) => [item.node.id, item]));
   const looks = new Map<string, PresenceStyle>();
   const lookOf = (item: DrawNode): PresenceStyle => {
@@ -295,7 +424,7 @@ export function drawState(state: DrawState, theme: Theme): Primitive[] {
       ],
     };
   });
-  return [...edges, ...nodes];
+  return [...underlays, ...edges, ...nodes];
 }
 
 /** Room around a node or edge for what themes draw past it, such as fold circles. */
@@ -363,6 +492,17 @@ export function primitiveBounds(primitives: Primitive[]): Rect {
       } else if (p.kind === 'rect' || p.kind === 'image') {
         const box = { x: p.x, y: p.y, width: p.w, height: p.h };
         addBox(outer, box, p.kind === 'rect' ? strokeOf(p) : 0);
+      } else if (p.kind === 'text') {
+        for (const run of p.runs) {
+          const width = run.width ?? run.text.length * run.font.size * 0.6;
+          const box = {
+            x: p.x + run.x,
+            y: p.y + run.y - run.font.size,
+            width,
+            height: run.font.size,
+          };
+          addBox(outer, box, 0);
+        }
       } else if (p.kind === 'path') {
         const s = strokeOf(p);
         for (const [x, y] of pathPoints(p.d)) addPoint(outer, x, y, s);

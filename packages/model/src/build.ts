@@ -77,6 +77,17 @@ export function buildFromTree(source: string, root: MarkmapNode, meta: DocumentM
     bodyStart,
     meta.htmlBlocks ?? [],
   );
+  if (!conventions.issues.some((issue) => issue.code === 'E_GRAPH')) {
+    const resolve = (ref: string): string | undefined =>
+      ref === 'root' ? root.id : conventions.identities.get(ref);
+    root.data['groups'] = conventions.graph.groups.map((group, index) => ({
+      id: `group-${index}`,
+      roots: group.roots.map(resolve).filter((id): id is string => id !== undefined),
+      label: group.label,
+    }));
+  } else {
+    root.data['groups'] = [];
+  }
   return {
     source,
     root: root.id,

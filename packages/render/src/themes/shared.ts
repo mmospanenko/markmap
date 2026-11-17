@@ -8,6 +8,8 @@ export const CONTENT_TOKENS = {
   'mm-mark-bg': '#ffeaa7',
   'mm-checkbox': '#555',
   'mm-note-dot': '#999',
+  'mm-group-border': 'rgba(0, 122, 255, 0.45)',
+  'mm-group-fill': 'rgba(0, 122, 255, 0.08)',
   // Code highlighting in popovers.
   'mm-syntax-keyword': '#cf222e',
   'mm-syntax-string': '#0a3069',
@@ -24,6 +26,8 @@ export const DARK_CONTENT_TOKENS = {
   'mm-mark-bg': '#6b5a1e',
   'mm-checkbox': '#bbb',
   'mm-note-dot': '#888',
+  'mm-group-border': 'rgba(88, 166, 255, 0.45)',
+  'mm-group-fill': 'rgba(88, 166, 255, 0.12)',
   'mm-syntax-keyword': '#ff7b72',
   'mm-syntax-string': '#a5d6ff',
   'mm-syntax-comment': '#8b949e',

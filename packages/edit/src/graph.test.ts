@@ -381,3 +381,260 @@ describe('graph errors', () => {
     );
   });
 });
+
+describe('group commands', () => {
+  it('[TC-1-23-7] creates group boundary for single subtree, mints identity', () => {
+    const doc = parseDocument('# Root\n\n- A\n- B\n').document;
+    const aNode = find(doc, 'A');
+    const result = applyCommand(doc, {
+      type: 'createGroup',
+      nodes: [aNode.id],
+      label: 'Group A',
+      random: () => 0,
+    });
+    expect(result.document.graph.groups).toHaveLength(1);
+    expect(result.document.graph.groups[0].label).toBe('Group A');
+    const aIdentity = find(result.document, 'A').identity?.id;
+    expect(aIdentity).toBeDefined();
+    expect(result.document.graph.groups[0].roots).toEqual([aIdentity]);
+    expect(result.document.source).toContain(`<!-- ^${aIdentity} -->`);
+    expect(validateConventions(result.document)).toEqual([]);
+
+    const rootResult = applyCommand(doc, {
+      type: 'createGroup',
+      nodes: [doc.root],
+      label: 'Root Group',
+    });
+    expect(rootResult.document.graph.groups[0].roots).toEqual(['root']);
+
+    const withExisting = applyCommand(result.document, {
+      type: 'createGroup',
+      nodes: [find(result.document, 'B').id],
+      label: 'Group B',
+      random: () => 0,
+    });
+    expect(withExisting.document.graph.groups).toHaveLength(2);
+
+    expect(() => applyCommand(doc, { type: 'createGroup', nodes: [] })).toThrow(EditError);
+    expect(() => applyCommand(doc, { type: 'createGroup', nodes: ['missing'] })).toThrow(EditError);
+
+    const docExistingId = parseDocument('# Root\n\n- A <!-- ^a -->\n').document;
+    const noLabelResult = applyCommand(docExistingId, {
+      type: 'createGroup',
+      nodes: [find(docExistingId, 'A').id],
+    });
+    expect(noLabelResult.document.graph.groups[0].roots).toEqual(['a']);
+    expect(noLabelResult.document.graph.groups[0].label).toBeNull();
+
+    const noBlockDoc = parseDocument('# Root\n\n- A\n').document;
+    const noBlockNode = find(noBlockDoc, 'A');
+    noBlockNode.block = null;
+    expect(() =>
+      applyCommand(noBlockDoc, { type: 'createGroup', nodes: [noBlockNode.id] }),
+    ).toThrow(EditError);
+
+    const crlfDoc = parseDocument(
+      '# Root\r\n\r\n- A <!-- ^a -->\r\n- B\r\n\r\n<!-- markmap: graph\r\ngroups:\n  - roots: [a]\r\n-->\r\n',
+    ).document;
+    const crlfResult = applyCommand(crlfDoc, {
+      type: 'createGroup',
+      nodes: [find(crlfDoc, 'B').id],
+      random: () => 0,
+    });
+    expect(crlfResult.document.graph.groups).toHaveLength(2);
+
+    const noNewlineDoc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n- B\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n-->',
+    ).document;
+    const noNewlineResult = applyCommand(noNewlineDoc, {
+      type: 'createGroup',
+      nodes: [find(noNewlineDoc, 'B').id],
+      random: () => 0,
+    });
+    expect(noNewlineResult.document.graph.groups).toHaveLength(2);
+  });
+
+  it('[TC-1-23-8] creates group boundary for contiguous siblings under common parent', () => {
+    const doc = parseDocument('# Root\n\n- A\n- B\n- C\n').document;
+    const bNode = find(doc, 'B');
+    const cNode = find(doc, 'C');
+    const result = applyCommand(doc, {
+      type: 'createGroup',
+      nodes: [bNode.id, cNode.id],
+      label: 'Siblings',
+      random: () => 0,
+    });
+    expect(result.document.graph.groups).toHaveLength(1);
+    expect(result.document.graph.groups[0].label).toBe('Siblings');
+    const bId = find(result.document, 'B').identity?.id;
+    const cId = find(result.document, 'C').identity?.id;
+    expect(result.document.graph.groups[0].roots).toEqual([bId, cId]);
+    expect(validateConventions(result.document)).toEqual([]);
+  });
+
+  it('[TC-1-23-9] rejects group with roots under different parents or non-contiguous siblings', () => {
+    const doc = parseDocument('# Root\n\n- P1\n  - A\n- P2\n  - B\n- A2\n- Mid\n- A3\n').document;
+    const aNode = find(doc, 'A');
+    const bNode = find(doc, 'B');
+    expect(() =>
+      applyCommand(doc, {
+        type: 'createGroup',
+        nodes: [aNode.id, bNode.id],
+      }),
+    ).toThrow(EditError);
+
+    const a2 = find(doc, 'A2');
+    const a3 = find(doc, 'A3');
+    expect(() =>
+      applyCommand(doc, {
+        type: 'createGroup',
+        nodes: [a2.id, a3.id],
+      }),
+    ).toThrow(EditError);
+
+    expect(() =>
+      applyCommand(doc, {
+        type: 'createGroup',
+        nodes: [doc.root, aNode.id],
+      }),
+    ).toThrow(EditError);
+  });
+
+  it('[TC-1-23-10] rejects group whose subtree overlaps an existing group', () => {
+    const doc = parseDocument(
+      '# Root\n\n- P\n  - A <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: Inner\n-->\n',
+    ).document;
+    const pNode = find(doc, 'P');
+    expect(() =>
+      applyCommand(doc, {
+        type: 'createGroup',
+        nodes: [pNode.id],
+        label: 'Outer',
+      }),
+    ).toThrow(EditError);
+
+    const rootDoc = parseDocument(
+      '# Root\n\n- P\n\n<!-- markmap: graph\ngroups:\n  - roots: [root]\n    label: Top\n-->\n',
+    ).document;
+    expect(() =>
+      applyCommand(rootDoc, {
+        type: 'createGroup',
+        nodes: [find(rootDoc, 'P').id],
+      }),
+    ).toThrow(EditError);
+
+    const danglingDoc = parseDocument(
+      '# Root\n\n- P\n\n<!-- markmap: graph\ngroups:\n  - roots: [z]\n    label: Top\n-->\n',
+    ).document;
+    const danglingResult = applyCommand(danglingDoc, {
+      type: 'createGroup',
+      nodes: [find(danglingDoc, 'P').id],
+      random: () => 0,
+    });
+    expect(danglingResult.document.graph.groups).toHaveLength(2);
+  });
+
+  it('[TC-1-23-11] rejects group label with HTML comment markers', () => {
+    const doc = parseDocument('# Root\n\n- A\n').document;
+    const aNode = find(doc, 'A');
+    expect(() =>
+      applyCommand(doc, {
+        type: 'createGroup',
+        nodes: [aNode.id],
+        label: 'Bad <!-- label -->',
+      }),
+    ).toThrow(EditError);
+  });
+
+  it('[TC-1-23-12] deletes group boundary and removes unreferenced markers', () => {
+    const doc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n- B <!-- ^b -->\n\n<!-- markmap: graph\nedges:\n  - from: b\n    to: root\ngroups:\n  - roots: [a]\n    label: DelMe\n-->\n',
+    ).document;
+    const result = applyCommand(doc, {
+      type: 'deleteGroup',
+      groupIndex: 0,
+    });
+    expect(result.document.graph.groups).toHaveLength(0);
+    expect(result.document.graph.edges).toHaveLength(1);
+    expect(find(result.document, 'A').identity).toBeNull();
+    expect(find(result.document, 'B').identity?.id).toBe('b');
+    expect(validateConventions(result.document)).toEqual([]);
+    expect(() => applyCommand(doc, { type: 'deleteGroup', groupIndex: 99 })).toThrow(EditError);
+
+    const twoGroupsDoc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n- B <!-- ^b -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n  - roots: [b]\n-->\n',
+    ).document;
+    const delOne = applyCommand(twoGroupsDoc, {
+      type: 'deleteGroup',
+      groupIndex: 0,
+    });
+    expect(delOne.document.graph.groups).toHaveLength(1);
+    expect(find(delOne.document, 'A').identity).toBeNull();
+    expect(find(delOne.document, 'B').identity?.id).toBe('b');
+  });
+
+  it('[TC-1-23-13] deletes group boundary and removes graph block when no data remains', () => {
+    const doc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: DelMe\n-->\n',
+    ).document;
+    const result = applyCommand(doc, {
+      type: 'deleteGroup',
+      groupIndex: 0,
+    });
+    expect(result.document.graph.groups).toHaveLength(0);
+    expect(result.document.graph.block).toBeNull();
+    expect(result.document.source).toBe('# Root\n\n- A\n');
+    expect(validateConventions(result.document)).toEqual([]);
+  });
+
+  it('[TC-1-23-14] sets group label in graph metadata', () => {
+    const doc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: Old\n-->\n',
+    ).document;
+    const result = applyCommand(doc, {
+      type: 'setGroupLabel',
+      groupIndex: 0,
+      text: 'New Label',
+    });
+    expect(result.document.graph.groups[0].label).toBe('New Label');
+    expect(validateConventions(result.document)).toEqual([]);
+    const cleared = applyCommand(result.document, {
+      type: 'setGroupLabel',
+      groupIndex: 0,
+      text: '',
+    });
+    expect(cleared.document.graph.groups[0].label).toBeNull();
+    expect(() =>
+      applyCommand(result.document, {
+        type: 'setGroupLabel',
+        groupIndex: 0,
+        text: 'Bad <!-- -->',
+      }),
+    ).toThrow(EditError);
+    expect(() =>
+      applyCommand(result.document, {
+        type: 'setGroupLabel',
+        groupIndex: 99,
+        text: 'X',
+      }),
+    ).toThrow(EditError);
+    const noGraph = parseDocument('# Root\n\n- A\n').document;
+    expect(() =>
+      applyCommand(noGraph, {
+        type: 'setGroupLabel',
+        groupIndex: 0,
+        text: 'X',
+      }),
+    ).toThrow(EditError);
+
+    const crlfLabelDoc = parseDocument(
+      '# Root\r\n\r\n- A <!-- ^a -->\r\n\r\n<!-- markmap: graph\r\ngroups:\r\n  - roots: [a]\r\n    label: Old\r\n-->\r\n',
+    ).document;
+    const crlfLabelResult = applyCommand(crlfLabelDoc, {
+      type: 'setGroupLabel',
+      groupIndex: 0,
+      text: 'CRLF New',
+    });
+    expect(crlfLabelResult.document.graph.groups[0].label).toBe('CRLF New');
+  });
+});
