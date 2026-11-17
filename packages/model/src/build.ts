@@ -1,5 +1,6 @@
 import type { MarkmapNode } from '@markmap/core';
 import { parse } from '@markmap/parse';
+import { readConventions } from './conventions';
 import { firstLine, HEADING_MARKER, indentWidth, lineStart, LIST_MARKER } from './source';
 import type {
   Capabilities,
@@ -21,9 +22,9 @@ export interface ParseDocumentResult {
 }
 
 export function parseDocument(source: string): ParseDocumentResult {
-  const { root, frontmatter, hasTitle, bodyStart } = parse(source);
+  const { root, frontmatter, hasTitle, bodyStart, htmlBlocks } = parse(source);
   return {
-    document: buildFromTree(source, root, { hasTitle, bodyStart }),
+    document: buildFromTree(source, root, { hasTitle, bodyStart, htmlBlocks }),
     tree: root,
     frontmatter,
   };
@@ -68,7 +69,25 @@ export function buildFromTree(source: string, root: MarkmapNode, meta: DocumentM
     hasHeadingChild: headingChild,
     canCreateHeading,
   };
-  return { source, root: root.id, nodes, order, unit, rootPolicy };
+  const conventions = readConventions(
+    source,
+    nodes,
+    order,
+    root.id,
+    bodyStart,
+    meta.htmlBlocks ?? [],
+  );
+  return {
+    source,
+    root: root.id,
+    nodes,
+    order,
+    unit,
+    rootPolicy,
+    identities: conventions.identities,
+    graph: conventions.graph,
+    conventionIssues: conventions.issues,
+  };
 }
 
 function buildNode(source: string, tree: MarkmapNode, parent: EditNode | null): EditNode {
@@ -141,6 +160,7 @@ function buildNode(source: string, tree: MarkmapNode, parent: EditNode | null): 
     block,
     list,
     notes: readNotes(tree, source.length),
+    identity: null,
     opaque,
     capabilities: emptyCapabilities(),
   };

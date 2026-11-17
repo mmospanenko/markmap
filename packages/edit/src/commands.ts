@@ -6,6 +6,7 @@ import {
   labelText,
   lineEnd,
   lineStart,
+  newConventionIssues,
   normalizeNoteText,
   noteText,
   notesText,
@@ -14,9 +15,18 @@ import {
   type Document,
   type EditNode,
   type NoteRange,
+  type RandomSource,
   type Range,
 } from '@markmap/model';
 import { EditError } from './errors';
+import {
+  graphBlockSplices,
+  markerRemovalSplices,
+  mergeGraphSplice,
+  readPastedGraph,
+  removeGraphNodes,
+  subtreeIds,
+} from './graph';
 import {
   assertSingleLine,
   blockInsertion,
@@ -47,7 +57,7 @@ export type Command =
   | { type: 'createRootHeading'; node: string; text: string }
   | { type: 'insertChild'; node: string; text?: string }
   | { type: 'insertSibling'; node: string; text?: string }
-  | { type: 'insertBlock'; node: string; text: string }
+  | { type: 'insertBlock'; node: string; text: string; random?: RandomSource }
   | { type: 'delete'; node: string }
   | { type: 'deleteNodes'; nodes: string[] }
   | { type: 'outdent'; node: string }
@@ -110,7 +120,7 @@ function planCommand(doc: Document, command: Command): Plan {
     case 'insertSibling':
       return planInsert(doc, node, command.text ?? '', 'sibling');
     case 'insertBlock':
-      return planInsertBlock(doc, node, command.text);
+      return planInsertBlock(doc, node, command.text, command.random);
     case 'delete':
       return planDelete(doc, node);
     case 'outdent':
@@ -557,10 +567,17 @@ function attachLeadingNotes(
   return `${head}${ending}${ending}${text}${rest ? ending + ending + rest : ''}`;
 }
 
-function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
+function planInsertBlock(
+  doc: Document,
+  node: EditNode,
+  raw: string,
+  random: RandomSource | undefined,
+): Plan {
   requireCapability(node, 'addChild');
   const ending = lineEnding(doc.source);
-  const block = normalizeBlockText(raw, ending);
+  const normalized = normalizeBlockText(raw, ending);
+  const graphRead = readPastedGraph(doc, normalized, ending, random ?? Math.random);
+  const block = normalizeBlockText(graphRead.body, ending);
   if (!block.trim()) throw new EditError('E_LABEL', 'The pasted text is empty', node.id);
   const fragment = parseDocument(block).document;
   const fragmentRoot = fragment.nodes.get(fragment.root);
@@ -637,8 +654,12 @@ function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
   const marker = firstLineMarker(moved);
   const expected = firstLine(fragment.source, top.label.start).replace(/\r$/u, '');
   const emptyRoot = node.kind === 'root' && !node.block && node.children.length === 0;
+  const edits: Splice[] = [{ from: position, to: position, insert: placed.insert }];
+  if (graphRead.edges.length > 0 || graphRead.groups.length > 0) {
+    edits.push(mergeGraphSplice(doc.source, doc, graphRead.edges, graphRead.groups, ending));
+  }
   return {
-    edits: [{ from: position, to: position, insert: placed.insert }],
+    edits,
     selection: { kind: 'insert', edit: 0, offset: placed.leading + marker },
     verify(next, selection) {
       const created = nodeByLabelStart(next, selection);
@@ -710,6 +731,10 @@ function planInsertBlock(doc: Document, node: EditNode, raw: string): Plan {
         firstLine(next.source, created.label.start).replace(/\r$/u, '') !== expected
       ) {
         throw shape('The pasted label did not survive parsing');
+      }
+      const fresh = newConventionIssues(doc, next);
+      if ((graphRead.edges.length > 0 || graphRead.groups.length > 0) && fresh.length > 0) {
+        throw shape(`The paste produced invalid graph metadata: ${fresh[0]?.message ?? ''}`);
       }
     },
   };
@@ -798,13 +823,21 @@ function planDelete(doc: Document, node: EditNode): Plan {
   const previous = index > 0 ? doc.nodes.get(parent.children[index - 1]) : undefined;
   const target = previous?.label?.start ?? parent.label?.start ?? parent.block?.start ?? 0;
   const removed = countSubtree(doc, node);
+  const removal = removeGraphNodes(doc, subtreeIds(doc, node.id));
+  const edits: Splice[] = [{ from: cut.start, to: cut.end, insert: '' }];
+  edits.push(...graphBlockSplices(doc.source, doc, removal, cut));
+  edits.push(...markerRemovalSplices(doc.source, removal));
   return {
-    edits: [{ from: cut.start, to: cut.end, insert: '' }],
+    edits,
     selection: { kind: 'source', offset: target },
     verify(next) {
       if (contentNodeCount(next) !== contentNodeCount(doc) - removed)
         throw shape('The node count did not shrink');
       if (next.nodes.has(node.id)) throw shape('The removed node is still present');
+      const fresh = newConventionIssues(doc, next);
+      if (removal.changed && fresh.length > 0) {
+        throw shape(`The delete produced invalid graph metadata: ${fresh[0]?.message ?? ''}`);
+      }
     },
   };
 }

@@ -1,7 +1,7 @@
 import {
   EditError,
   applyCommand,
-  lineEnding,
+  copyBlock,
   mapOffset,
   rootHeadingRefusal,
   type Command,
@@ -15,6 +15,7 @@ import {
   parseDocument,
   type Document as MarkdownDocument,
   type EditNode,
+  type RandomSource,
 } from '@markmap/model';
 import { History } from './history';
 import type { EditView, EditorChange, HistoryEntry, MarkmapEditorOptions } from './types';
@@ -202,6 +203,7 @@ export class MarkmapEditor {
   private readonly onDraftChange?: (change: EditorChange) => void;
   private readonly onError?: (error: Error) => void;
   private readonly placeholder: string;
+  private readonly random: RandomSource;
   private readonly restorePosition: boolean;
   private readonly restoreTabIndex: boolean;
   private readonly stops: Array<() => void> = [];
@@ -224,6 +226,7 @@ export class MarkmapEditor {
     view,
     container,
     placeholder,
+    random,
     onChange,
     onDraftChange,
     onError,
@@ -238,6 +241,7 @@ export class MarkmapEditor {
     this.onDraftChange = onDraftChange;
     this.onError = onError;
     this.placeholder = placeholder?.trim() || 'New topic';
+    this.random = random ?? Math.random;
 
     const doc = container.ownerDocument;
     acquireStyle(doc);
@@ -431,36 +435,11 @@ export class MarkmapEditor {
   selectedBlock(): string | null {
     const node = this.selectedNode();
     if (!node) return null;
-    if (node.block) {
-      const block = node.block;
-      if (node.kind !== 'root') return this.doc.source.slice(block.start, block.end);
-      const before = node.notes.filter((note) => note.range.end <= block.start);
-      const start = before.length
-        ? Math.min(...before.map((note) => note.range.start))
-        : block.start;
-      return this.doc.source.slice(start, block.end);
-    }
-    if (node.id !== this.doc.root) return null;
-    const children = node.children
-      .map((id) => this.doc.nodes.get(id))
-      .filter((child): child is EditNode => Boolean(child?.block));
-    const first = children[0];
-    const last = children[children.length - 1];
-    const ranges = node.notes.map((note) => note.range);
-    if (first?.block) ranges.push(first.block);
-    if (last?.block) ranges.push(last.block);
-    const start = ranges.length ? Math.min(...ranges.map((range) => range.start)) : null;
-    const end = ranges.length ? Math.max(...ranges.map((range) => range.end)) : null;
-    const body = start == null || end == null ? '' : this.doc.source.slice(start, end);
-    const title = this.title.replace(/\s+/gu, ' ').trim();
-    if (!title) return body || null;
-    const heading = `# ${title}`;
-    const ending = lineEnding(this.doc.source);
-    return body ? `${heading}${ending}${ending}${body}` : heading;
+    return copyBlock(this.doc, node.id, { title: this.title, random: this.random });
   }
 
   insertBlock(text: string): boolean {
-    return this.runSelected({ type: 'insertBlock', text }) !== null;
+    return this.runSelected({ type: 'insertBlock', text, random: this.random }) !== null;
   }
 
   insertLabel(text: string): boolean {
