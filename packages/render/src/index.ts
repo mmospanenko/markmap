@@ -14,3 +14,4 @@ export * from './themes/classic';
 export * from './themes/minimal';
 export * from './themes/soft';
 export * from './animate';
+export * from './relation';

@@ -18,6 +18,7 @@ import {
   type EditNode,
   type GraphData,
   type GraphGroup,
+  type GraphEdge,
   type NoteRange,
   type RandomSource,
   type Range,
@@ -72,7 +73,10 @@ export type Command =
   | { type: 'toggleCheck'; node: string }
   | { type: 'createGroup'; nodes: string[]; label?: string; random?: RandomSource }
   | { type: 'deleteGroup'; groupIndex: number }
-  | { type: 'setGroupLabel'; groupIndex: number; text: string };
+  | { type: 'setGroupLabel'; groupIndex: number; text: string }
+  | { type: 'createEdge'; from: string; to: string; label?: string | null; random?: RandomSource }
+  | { type: 'deleteEdge'; from: string; to: string }
+  | { type: 'setEdgeLabel'; from: string; to: string; label: string | null };
 
 export interface EditResult {
   document: Document;
@@ -85,7 +89,7 @@ type SelectionPlan =
   | { kind: 'insert'; edit: number; offset: number }
   | { kind: 'source'; offset: number };
 
-interface Plan {
+export interface Plan {
   edits: Splice[];
   selection: SelectionPlan;
   verify: (next: Document, selection: number) => void;
@@ -111,7 +115,7 @@ export function applyCommand(doc: Document, command: Command): EditResult {
   return { document: next, tree, edits: plan.edits, selection };
 }
 
-function planCommand(doc: Document, command: Command): Plan {
+export function planCommand(doc: Document, command: Command): Plan {
   if (command.type === 'deleteNodes') return planDeleteNodes(doc, command.nodes);
   if (command.type === 'moveNodes') {
     return planMoveNodes(doc, command.nodes, command.parent, command.index);
@@ -124,6 +128,15 @@ function planCommand(doc: Document, command: Command): Plan {
   }
   if (command.type === 'setGroupLabel') {
     return planSetGroupLabel(doc, command.groupIndex, command.text);
+  }
+  if (command.type === 'createEdge') {
+    return planCreateEdge(doc, command.from, command.to, command.label ?? null, command.random);
+  }
+  if (command.type === 'deleteEdge') {
+    return planDeleteEdge(doc, command.from, command.to);
+  }
+  if (command.type === 'setEdgeLabel') {
+    return planSetEdgeLabel(doc, command.from, command.to, command.label);
   }
   const node = nodeOf(doc, command.node);
   switch (command.type) {
@@ -1388,6 +1401,288 @@ function countSubtree(doc: Document, node: EditNode): number {
   return count;
 }
 
+function resolveNode(doc: Document, ref: string): EditNode | undefined {
+  const direct = doc.nodes.get(ref);
+  if (direct) return direct;
+  const targetId = doc.identities.get(ref);
+  if (targetId !== undefined) return doc.nodes.get(targetId);
+  return undefined;
+}
+
+function resolveIdentity(doc: Document, ref: string): string {
+  if (ref === 'root' || ref === doc.root) return 'root';
+  const node = doc.nodes.get(ref);
+  if (node && node.identity && node.identity.range !== null) {
+    return node.identity.id;
+  }
+  return ref;
+}
+
+function nodeLineInsertOffset(source: string, blockStart: number): number {
+  let end = lineEnd(source, blockStart);
+  if (end > blockStart && source[end - 1] === '\r') {
+    end -= 1;
+  }
+  while (end > blockStart && (source[end - 1] === ' ' || source[end - 1] === '\t')) {
+    end -= 1;
+  }
+  return end;
+}
+
+function hasGraphIssue(doc: Document): boolean {
+  for (const issue of doc.conventionIssues) {
+    if (issue.code === 'E_GRAPH') return true;
+  }
+  return false;
+}
+
+function hasConventionIssue(doc: Document): boolean {
+  for (const issue of doc.conventionIssues) {
+    if (issue.code === 'E_GRAPH' || issue.code === 'E_IDENTITY') return true;
+  }
+  return false;
+}
+
+function planCreateEdge(
+  doc: Document,
+  fromRef: string,
+  toRef: string,
+  rawLabel: string | null,
+  random?: RandomSource,
+): Plan {
+  if (hasGraphIssue(doc)) {
+    throw new EditError('E_SHAPE', 'The document graph metadata is invalid');
+  }
+  const fromNode = resolveNode(doc, fromRef);
+  if (!fromNode) {
+    throw new EditError('E_NODE', 'The source node does not exist', fromRef);
+  }
+  const toNode = resolveNode(doc, toRef);
+  if (!toNode) {
+    throw new EditError('E_NODE', 'The target node does not exist', toRef);
+  }
+  if (fromNode.opaque || !fromNode.block) {
+    throw new EditError(
+      'E_CAPABILITY',
+      'The node does not support relationship edges',
+      fromNode.id,
+    );
+  }
+  if (toNode.opaque || !toNode.block) {
+    throw new EditError('E_CAPABILITY', 'The node does not support relationship edges', toNode.id);
+  }
+  if (fromNode.id === toNode.id) {
+    throw new EditError('E_SHAPE', 'Self-loops are not supported');
+  }
+  const label = rawLabel && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
+  if (label && (label.includes('<!--') || label.includes('-->'))) {
+    throw new EditError('E_SHAPE', 'The edge label cannot contain HTML comments');
+  }
+
+  const taken = new Set(doc.identities.keys());
+  for (const id of doc.order) {
+    const identity = doc.nodes.get(id)?.identity;
+    if (identity && identity.range !== null) taken.add(identity.id);
+  }
+
+  const splices: Splice[] = [];
+
+  let fromIdentity: string;
+  if (fromNode.id === doc.root) {
+    fromIdentity = 'root';
+  } else if (fromNode.identity && fromNode.identity.range !== null) {
+    fromIdentity = fromNode.identity.id;
+  } else {
+    const minted = mintIdentity(taken, random ?? Math.random);
+    if (!minted) {
+      throw new EditError('E_SHAPE', 'No node identity characters remain');
+    }
+    fromIdentity = minted;
+    taken.add(minted);
+    const end = nodeLineInsertOffset(doc.source, fromNode.block.start);
+    splices.push({ from: end, to: end, insert: ` <!-- ^${minted} -->` });
+  }
+
+  let toIdentity: string;
+  if (toNode.id === doc.root) {
+    toIdentity = 'root';
+  } else if (toNode.identity && toNode.identity.range !== null) {
+    toIdentity = toNode.identity.id;
+  } else {
+    const minted = mintIdentity(taken, random ?? Math.random);
+    if (!minted) {
+      throw new EditError('E_SHAPE', 'No node identity characters remain');
+    }
+    toIdentity = minted;
+    taken.add(minted);
+    const end = nodeLineInsertOffset(doc.source, toNode.block.start);
+    splices.push({ from: end, to: end, insert: ` <!-- ^${minted} -->` });
+  }
+
+  if (doc.graph.edges.some((edge) => edge.from === fromIdentity && edge.to === toIdentity)) {
+    throw new EditError('E_SHAPE', 'An edge already exists between these nodes');
+  }
+
+  const nextEdge: GraphEdge = { from: fromIdentity, to: toIdentity, label };
+  const nextGraph: GraphData = {
+    edges: [...doc.graph.edges, nextEdge],
+    groups: doc.graph.groups,
+    block: doc.graph.block,
+  };
+  const ending = doc.source.includes('\r\n') ? '\r\n' : '\n';
+
+  if (doc.graph.block === null) {
+    const append = appendGraphSplice(doc.source, nextGraph, ending);
+    if (append) splices.push(append);
+  } else {
+    splices.push({
+      from: doc.graph.block.start,
+      to: doc.graph.block.end,
+      insert: serializeGraphBlock(nextGraph, ending),
+    });
+  }
+
+  const selectionOffset = fromNode.label ? fromNode.label.start : fromNode.block.start;
+  return {
+    edits: splices,
+    selection: { kind: 'source', offset: selectionOffset },
+    verify(next) {
+      if (hasConventionIssue(next)) {
+        throw new EditError('E_SHAPE', 'The created edge produced convention issues');
+      }
+      const created = next.graph.edges.find((e) => e.from === fromIdentity && e.to === toIdentity);
+      if (!created || created.label !== label) {
+        throw new EditError('E_SHAPE', 'The created edge did not survive parsing');
+      }
+    },
+  };
+}
+
+function planDeleteEdge(doc: Document, fromRef: string, toRef: string): Plan {
+  if (hasGraphIssue(doc)) {
+    throw new EditError('E_SHAPE', 'The document graph metadata is invalid');
+  }
+  const fromNode = resolveNode(doc, fromRef);
+  const fromIdentity = resolveIdentity(doc, fromRef);
+  const toIdentity = resolveIdentity(doc, toRef);
+
+  const edgeExists = doc.graph.edges.some(
+    (edge) => edge.from === fromIdentity && edge.to === toIdentity,
+  );
+  if (!edgeExists) {
+    throw new EditError('E_SHAPE', 'The edge does not exist');
+  }
+
+  const remainingEdges = doc.graph.edges.filter(
+    (edge) => !(edge.from === fromIdentity && edge.to === toIdentity),
+  );
+
+  const referenced = new Set<string>();
+  for (const edge of remainingEdges) {
+    referenced.add(edge.from);
+    referenced.add(edge.to);
+  }
+  for (const group of doc.graph.groups) {
+    for (const root of group.roots) referenced.add(root);
+  }
+
+  const drop: { nodeId: string; range: Range }[] = [];
+  for (const id of doc.order) {
+    const identity = doc.nodes.get(id)?.identity;
+    if (!identity || identity.range === null) continue;
+    if (!referenced.has(identity.id)) drop.push({ nodeId: id, range: identity.range });
+  }
+
+  const removal: GraphRemoval = {
+    graph: { edges: remainingEdges, groups: doc.graph.groups, block: doc.graph.block },
+    drop,
+    changed: true,
+  };
+
+  const markerSplices = markerRemovalSplices(doc.source, removal);
+  const graphSplices = graphBlockSplices(doc.source, doc, removal, { start: 0, end: 0 });
+  const splices = [...markerSplices, ...graphSplices];
+
+  const selectionOffset = fromNode?.label ? fromNode.label.start : 0;
+  return {
+    edits: splices,
+    selection: { kind: 'source', offset: selectionOffset },
+    verify(next) {
+      if (hasConventionIssue(next)) {
+        throw new EditError('E_SHAPE', 'Deleting edge produced convention issues');
+      }
+      const found = next.graph.edges.some(
+        (edge) => edge.from === fromIdentity && edge.to === toIdentity,
+      );
+      if (found) {
+        throw new EditError('E_SHAPE', 'The edge was not deleted');
+      }
+    },
+  };
+}
+
+function planSetEdgeLabel(
+  doc: Document,
+  fromRef: string,
+  toRef: string,
+  rawLabel: string | null,
+): Plan {
+  if (hasGraphIssue(doc)) {
+    throw new EditError('E_SHAPE', 'The document graph metadata is invalid');
+  }
+  const fromNode = resolveNode(doc, fromRef);
+  const fromIdentity = resolveIdentity(doc, fromRef);
+  const toIdentity = resolveIdentity(doc, toRef);
+
+  const edgeIndex = doc.graph.edges.findIndex(
+    (edge) => edge.from === fromIdentity && edge.to === toIdentity,
+  );
+  if (edgeIndex === -1) {
+    throw new EditError('E_SHAPE', 'The edge does not exist');
+  }
+
+  const label = rawLabel && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
+  if (label && (label.includes('<!--') || label.includes('-->'))) {
+    throw new EditError('E_SHAPE', 'The edge label cannot contain HTML comments');
+  }
+
+  const nextEdges = doc.graph.edges.map((edge, index) =>
+    index === edgeIndex ? { ...edge, label } : edge,
+  );
+  const nextGraph: GraphData = {
+    edges: nextEdges,
+    groups: doc.graph.groups,
+    block: doc.graph.block,
+  };
+  const ending = doc.source.includes('\r\n') ? '\r\n' : '\n';
+
+  const splices: Splice[] = [];
+  if (doc.graph.block) {
+    splices.push({
+      from: doc.graph.block.start,
+      to: doc.graph.block.end,
+      insert: serializeGraphBlock(nextGraph, ending),
+    });
+  }
+
+  const selectionOffset = fromNode?.label ? fromNode.label.start : 0;
+  return {
+    edits: splices,
+    selection: { kind: 'source', offset: selectionOffset },
+    verify(next) {
+      if (hasConventionIssue(next)) {
+        throw new EditError('E_SHAPE', 'Setting edge label produced convention issues');
+      }
+      const updated = next.graph.edges.find(
+        (edge) => edge.from === fromIdentity && edge.to === toIdentity,
+      );
+      if (!updated || updated.label !== label) {
+        throw new EditError('E_SHAPE', 'The edge label was not updated');
+      }
+    },
+  };
+}
+
 function shape(message: string): EditError {
   return new EditError('E_SHAPE', message);
 }
@@ -1587,13 +1882,11 @@ function planSetGroupLabel(doc: Document, groupIndex: number, rawText: string): 
   if (doc.graph.block === null) {
     throw new EditError('E_SHAPE', 'The document has no graph block');
   }
-  const original = doc.source.slice(doc.graph.block.start, doc.graph.block.end);
-  const trailing = original.endsWith('\r\n') ? '\r\n' : original.endsWith('\n') ? '\n' : '';
   const edits: Splice[] = [
     {
       from: doc.graph.block.start,
       to: doc.graph.block.end,
-      insert: `${serializeGraphBlock(nextGraph, ending)}${trailing}`,
+      insert: serializeGraphBlock(nextGraph, ending),
     },
   ];
   return {

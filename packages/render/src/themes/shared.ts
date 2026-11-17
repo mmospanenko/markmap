@@ -17,6 +17,8 @@ export const CONTENT_TOKENS = {
   'mm-syntax-number': '#0550ae',
   'mm-syntax-title': '#8250df',
   'mm-syntax-attr': '#116329',
+  'mm-edge-relation': '#8c959f',
+  'mm-edge-relation-label': '#57606a',
 };
 
 export const DARK_CONTENT_TOKENS = {
@@ -34,6 +36,8 @@ export const DARK_CONTENT_TOKENS = {
   'mm-syntax-number': '#79c0ff',
   'mm-syntax-title': '#d2a8ff',
   'mm-syntax-attr': '#7ee787',
+  'mm-edge-relation': '#8b949e',
+  'mm-edge-relation-label': '#c9d1d9',
 };
 
 export const SYSTEM_FONT: Theme['font'] = {

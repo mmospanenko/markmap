@@ -337,3 +337,137 @@ describe('group boundaries', () => {
     expect(interpGroup.rect.x).toBe((g1.rect.x + 100) / 2);
   });
 });
+
+describe('relationship edges', () => {
+  const tree = parse('# Root\n\n- Node A\n- Node B\n- Node C\n  - Sub C').root;
+  const a = tree.children[0];
+  const b = tree.children[1];
+  const c = tree.children[2];
+  const subC = c?.children[0];
+
+  it('[TC-2-31-1] renders relationship arrow overlay with curve, arrowhead and centered label with tokens', () => {
+    if (!a || !b) throw new Error('Nodes missing');
+    const graph = {
+      edges: [{ from: 'a', to: 'b', label: 'relates to' }],
+      groups: [],
+      block: null,
+    };
+    const identities = new Map([
+      ['a', a.id],
+      ['b', b.id],
+    ]);
+    const result = renderTree(tree, {
+      measurer: approximateMeasurer,
+      graph,
+      identities,
+    });
+    const rel = result.primitives.find((p) => p.kind === 'group' && p.key === 'relation:a:b');
+    expect(rel).toBeDefined();
+    if (!rel || rel.kind !== 'group') throw new Error('No relation group');
+    expect(rel.children.length).toBeGreaterThanOrEqual(3);
+    const curve = rel.children[0];
+    const arrow = rel.children[1];
+    const rect = rel.children[2];
+    const text = rel.children[3];
+    expect(curve.kind).toBe('path');
+    const pathCurve = curve.kind === 'path' ? curve : undefined;
+    expect(pathCurve?.d).toMatch(/^M\d+(\.\d+)?,.*C.*$/);
+    expect(pathCurve?.stroke).toBe('var(--mm-edge-relation, #8c959f)');
+    expect(arrow.kind).toBe('path');
+    const pathArrow = arrow.kind === 'path' ? arrow : undefined;
+    expect(pathArrow?.d).toMatch(/^M\d+(\.\d+)?,.*L.*L.*Z$/);
+    expect(pathArrow?.fill).toBe('var(--mm-edge-relation, #8c959f)');
+    expect(rect.kind).toBe('rect');
+    const rectShape = rect.kind === 'rect' ? rect : undefined;
+    expect(rectShape?.fill).toBe('var(--mm-bg, #ffffff)');
+    expect(rectShape?.stroke).toBe('var(--mm-edge-relation, #8c959f)');
+    expect(text.kind).toBe('text');
+    const textShape = text.kind === 'text' ? text : undefined;
+    expect(textShape?.runs[0]?.text).toBe('relates to');
+    expect(textShape?.runs[0]?.fill).toBe('var(--mm-edge-relation-label, #57606a)');
+  });
+
+  it('[TC-2-31-2] hides relationship edge when endpoint is folded', () => {
+    if (!a || !b) throw new Error('Nodes missing');
+    const graph = {
+      edges: [{ from: 'a', to: 'b', label: null }],
+      groups: [],
+      block: null,
+    };
+    const identities = new Map([
+      ['a', a.id],
+      ['b', b.id],
+    ]);
+    const result = renderTree(tree, {
+      measurer: approximateMeasurer,
+      graph,
+      identities,
+      folded: new Set([b.id]),
+    });
+    const rel = result.primitives.find((p) => p.kind === 'group' && p.key === 'relation:a:b');
+    expect(rel).toBeUndefined();
+  });
+
+  it('[TC-2-31-3] hides relationship edge when ancestor of endpoint is folded', () => {
+    if (!a || !c || !subC) throw new Error('Nodes missing');
+    const graph = {
+      edges: [{ from: 'a', to: 'sub', label: null }],
+      groups: [],
+      block: null,
+    };
+    const identities = new Map([
+      ['a', a.id],
+      ['sub', subC.id],
+    ]);
+    const result = renderTree(tree, {
+      measurer: approximateMeasurer,
+      graph,
+      identities,
+      folded: new Set([c.id]),
+    });
+    const rel = result.primitives.find((p) => p.kind === 'group' && p.key === 'relation:a:sub');
+    expect(rel).toBeUndefined();
+  });
+
+  it('[TC-2-31-4] keys relationship group with relation:from:to', () => {
+    if (!a || !b) throw new Error('Nodes missing');
+    const graph = {
+      edges: [{ from: 'a', to: 'b', label: null }],
+      groups: [],
+      block: null,
+    };
+    const identities = new Map([
+      ['a', a.id],
+      ['b', b.id],
+    ]);
+    const result = renderTree(tree, {
+      measurer: approximateMeasurer,
+      graph,
+      identities,
+    });
+    const rel = result.primitives.find((p) => p.kind === 'group' && p.key?.startsWith('relation:'));
+    expect(rel?.kind === 'group' ? rel.key : undefined).toBe('relation:a:b');
+  });
+
+  it('[TC-2-31-5] renders edge without label when label is null', () => {
+    if (!a || !b) throw new Error('Nodes missing');
+    const graph = {
+      edges: [{ from: 'a', to: 'b', label: null }],
+      groups: [],
+      block: null,
+    };
+    const identities = new Map([
+      ['a', a.id],
+      ['b', b.id],
+    ]);
+    const result = renderTree(tree, {
+      measurer: approximateMeasurer,
+      graph,
+      identities,
+    });
+    const rel = result.primitives.find((p) => p.kind === 'group' && p.key === 'relation:a:b');
+    if (!rel || rel.kind !== 'group') throw new Error('No relation group');
+    expect(rel.children).toHaveLength(2);
+    expect(rel.children.some((p) => p.kind === 'text')).toBe(false);
+  });
+});

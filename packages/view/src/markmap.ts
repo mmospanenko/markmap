@@ -1,5 +1,6 @@
 import {
   findNode,
+  type GraphData,
   type MarkmapNode,
   type Measurer,
   type Primitive,
@@ -284,6 +285,14 @@ export class Markmap {
   /** The final (not mid-animation) result of the last render. */
   get result(): RenderResult | undefined {
     return this.current;
+  }
+
+  setGraph(
+    graph: GraphData | undefined,
+    identities: ReadonlyMap<string, string> | undefined,
+  ): void {
+    this.viewOptions.graph = graph;
+    this.viewOptions.identities = identities;
   }
 
   /**
