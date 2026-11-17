@@ -1,6 +1,8 @@
 import {
   type ContentPlugin,
   type FrameNode,
+  type GraphData,
+  type GraphEdge,
   type InlineContext,
   type Layout,
   type LayoutNode,
@@ -27,6 +29,7 @@ import {
 } from '@markmap/core';
 import { treeLayout, visibleNodes } from './layouts/tree';
 import { defaultContentPlugins } from './default-plugins';
+import { renderRelationEdges } from './relation';
 import { layoutText, type TextLayout, transformContent } from './text';
 import { classicTheme } from './themes/classic';
 
@@ -50,6 +53,8 @@ export interface RenderOptions {
   /** Inline content renderers. Defaults to {@link defaultContentPlugins}. */
   plugins?: readonly ContentPlugin[];
   groups?: readonly RenderGroup[];
+  graph?: GraphData;
+  identities?: ReadonlyMap<string, string>;
 }
 
 export interface RenderResult {
@@ -275,6 +280,10 @@ export function renderTree(root: MarkmapNode, options: RenderOptions): RenderRes
       };
     }),
     groups: drawGroups,
+    rootId: root.id,
+    relations: options.graph?.edges,
+    identities: options.identities,
+    folded: options.folded,
   };
   const primitives = drawState(state, theme);
   const bounds = unionRects([layout.bounds, primitiveBounds(primitives)]);
@@ -319,6 +328,10 @@ export interface DrawGroup {
 export interface DrawState {
   nodes: DrawNode[];
   groups?: DrawGroup[];
+  rootId?: string;
+  relations?: readonly GraphEdge[];
+  identities?: ReadonlyMap<string, string>;
+  folded?: ReadonlySet<string>;
 }
 
 /**
@@ -424,7 +437,17 @@ export function drawState(state: DrawState, theme: Theme): Primitive[] {
       ],
     };
   });
-  return [...underlays, ...edges, ...nodes];
+  const relations = state.relations
+    ? renderRelationEdges({
+        edges: state.relations,
+        identities: state.identities,
+        nodesById: byId,
+        rootId: state.rootId,
+        folded: state.folded,
+        theme,
+      })
+    : [];
+  return [...underlays, ...edges, ...nodes, ...relations];
 }
 
 /** Room around a node or edge for what themes draw past it, such as fold circles. */

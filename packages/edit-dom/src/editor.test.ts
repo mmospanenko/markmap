@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { MarkmapNode, Rect, Side } from '@markmap/core';
+import type { GraphData, MarkmapNode, Rect, Side } from '@markmap/core';
 import { labelText, notesText, parseDocument, type Document } from '@markmap/model';
 import { softTheme } from '@markmap/render';
 import type { Markmap } from '@markmap/view';
@@ -15,6 +15,8 @@ class FakeView implements EditView {
   pans: Array<[number, number]> = [];
   folded = new Set<string>();
   tree?: MarkmapNode;
+  graph?: GraphData;
+  identities?: ReadonlyMap<string, string>;
   hit: { kind: string; nodeId?: string; groupId?: string } | undefined;
   focused: string[] = [];
   rects = new Map<string, Rect | undefined>();
@@ -28,6 +30,14 @@ class FakeView implements EditView {
 
   get foldedIds(): ReadonlySet<string> {
     return this.folded;
+  }
+
+  setGraph(
+    graph: GraphData | undefined,
+    identities: ReadonlyMap<string, string> | undefined,
+  ): void {
+    this.graph = graph;
+    this.identities = identities;
   }
 
   panBy(dx: number, dy: number): void {
@@ -112,6 +122,7 @@ function setup(source = '- a\n- b\n', options: Partial<MarkmapEditorOptions> = {
   const container = document.createElement('div');
   document.body.append(container);
   const view = new FakeView();
+  container.append(view.element);
   view.tree = parseDocument(source).tree;
   const changes: Array<{ source: string; selection: number; document: Document }> = [];
   const drafts: Array<{ source: string; selection: number; document: Document }> = [];
@@ -142,8 +153,60 @@ function setup(source = '- a\n- b\n', options: Partial<MarkmapEditorOptions> = {
     node.dataset.key = `node:${id}`;
     view.element.append(node);
   }
+  for (const edge of editor.document.graph?.edges ?? []) {
+    const rel = document.createElement('div');
+    rel.dataset.key = `relation:${edge.from}:${edge.to}`;
+    const line = document.createElement('div');
+    line.className = 'mm-relation-line';
+    const arrow = document.createElement('div');
+    arrow.className = 'mm-relation-arrow';
+    rel.append(line, arrow);
+    if (edge.label) {
+      const label = document.createElement('div');
+      label.className = 'mm-relation-label';
+      rel.append(label);
+    }
+    view.element.append(rel);
+  }
   view.emit('render');
   return { container, view, editor, changes, drafts, errors };
+}
+
+function connectHandle(container: HTMLElement): HTMLDivElement | null {
+  return container.querySelector<HTMLDivElement>('.mm-editor-connect-handle');
+}
+
+function connectPreview(container: HTMLElement): SVGElement | null {
+  return container.querySelector<SVGElement>('.mm-editor-connect-preview');
+}
+
+function relationField(container: HTMLElement): HTMLInputElement | null {
+  return container.querySelector<HTMLInputElement>('.mm-editor-relation-field');
+}
+
+function syncRelationElements(view: FakeView, editor: MarkmapEditor): void {
+  for (const edge of editor.document.graph?.edges ?? []) {
+    const relationKey = `relation:${edge.from}:${edge.to}`;
+    let rel = view.element.querySelector(`[data-key="${relationKey}"]`);
+    if (!rel) {
+      rel = document.createElement('div');
+      rel.setAttribute('data-key', relationKey);
+      const line = document.createElement('div');
+      line.className = 'mm-relation-line';
+      const arrow = document.createElement('div');
+      arrow.className = 'mm-relation-arrow';
+      rel.append(line, arrow);
+      view.element.append(rel);
+    }
+    const existingLabel = rel.querySelector('.mm-relation-label');
+    if (edge.label && !existingLabel) {
+      const label = document.createElement('div');
+      label.className = 'mm-relation-label';
+      rel.append(label);
+    } else if (!edge.label && existingLabel) {
+      existingLabel.remove();
+    }
+  }
 }
 
 function field(container: HTMLElement): HTMLTextAreaElement {
@@ -2149,6 +2212,7 @@ describe('createEditView', () => {
       hitAt: vi.fn<(x: number, y: number) => { kind: string; nodeId?: string } | undefined>(),
       layoutPoint: vi.fn<(clientX: number, clientY: number) => [number, number]>(),
       on: vi.fn<(kind: string, listener: () => void) => () => void>(),
+      setGraph: vi.fn<(graph?: GraphData, identities?: ReadonlyMap<string, string>) => void>(),
     };
     const view = createEditView(mm as unknown as Markmap);
     expect(view.element).toBe(element);
@@ -2162,6 +2226,7 @@ describe('createEditView', () => {
     const emptyView = createEditView({ ...mm, result: undefined } as unknown as Markmap);
     expect(emptyView.direction('a')).toBeUndefined();
     view.setTree({ id: 'root' } as MarkmapNode);
+    view.setGraph?.({ edges: [], groups: [], block: null }, new Map());
     view.setFolded('a', true);
     view.setFoldedIds(['a']);
     view.toggle('a');
@@ -2172,6 +2237,7 @@ describe('createEditView', () => {
     view.layoutPoint(1, 2);
     view.on('render', () => {});
     expect(mm.setTree).toHaveBeenCalled();
+    expect(mm.setGraph).toHaveBeenCalled();
     expect(mm.setFolded).toHaveBeenCalledWith('a', true);
     expect(mm.setFoldedIds).toHaveBeenCalledWith(['a'], undefined);
     expect(mm.toggle).toHaveBeenCalledWith('a');
@@ -3813,6 +3879,393 @@ describe('sibling multi-selection', () => {
     expect(selectedLabels(view, editor)).toEqual(['B', 'D']);
     expect(editor.selected).toBe(nodeId(editor, 'B'));
     expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-32-1] displays connect handle on single selected non-opaque node and hides it otherwise', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    const aId = nodeId(editor, 'a');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    expect(handle?.style.display).toBe('block');
+
+    const bId = nodeId(editor, 'b');
+    clickNode(container, view, bId, { metaKey: true });
+    expect(handle?.style.display).toBe('none');
+
+    editor.selectRelation(null);
+    expect(handle?.style.display).toBe('none');
+
+    const { container: c2, view: v2, editor: e2 } = setup('- a\n- # Opaque\n');
+    const opaqueId = e2.document.order.find((id) => e2.document.nodes.get(id)?.opaque);
+    if (!opaqueId) throw new Error('No opaque node');
+    clickNode(c2, v2, opaqueId);
+    expect(connectHandle(c2)?.style.display).toBe('none');
+  });
+
+  it('[TC-2-32-2] dragging from connect handle initiates connect gesture and renders preview curve following pointer', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    stack(view, editor);
+    const aId = nodeId(editor, 'a');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+    expect(handle.style.display).toBe('block');
+
+    handle.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true }));
+    handle.dispatchEvent(new PointerEvent('pointerdown', { button: 2, bubbles: true }));
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointermove', 112, 26);
+    const preview = connectPreview(container);
+    expect(preview?.style.display).toBe('none');
+
+    pointer(window, 'pointermove', 125, 35);
+    expect(preview?.style.display).toBe('block');
+    const line = preview?.querySelector('path');
+    expect(line?.getAttribute('d')).toContain('C');
+
+    const origScreenRect = view.screenRect.bind(view);
+    view.screenRect = () => undefined;
+    pointer(window, 'pointermove', 130, 40);
+    expect(preview?.style.display).toBe('none');
+    view.screenRect = origScreenRect;
+
+    pointer(window, 'pointercancel', 0, 0);
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointerup', 110, 25);
+    expect(connectPreview(container)?.style.display).toBe('none');
+  });
+
+  it('[TC-2-32-3] connect gesture validates candidate target: rejects self-loop, opaque node, and duplicate edge', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n- # Opaque\n- c <!-- ^c -->\n';
+    const { container, view, editor } = setup(source);
+    stack(view, editor);
+    const aId = nodeId(editor, 'a');
+    const bId = nodeId(editor, 'b');
+    const cId = nodeId(editor, 'c');
+    const opaqueId = editor.document.order.find((id) => editor.document.nodes.get(id)?.opaque);
+    if (!opaqueId) throw new Error('No opaque node');
+
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointermove', 125, 35);
+
+    view.hit = { kind: 'node', nodeId: aId };
+    pointer(window, 'pointermove', 50, 25);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${aId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(false);
+
+    view.hit = { kind: 'node', nodeId: bId };
+    pointer(window, 'pointermove', 50, 85);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${bId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(false);
+
+    view.hit = { kind: 'node', nodeId: opaqueId };
+    pointer(window, 'pointermove', 50, 145);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${opaqueId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(false);
+
+    view.hit = { kind: 'node', nodeId: cId };
+    pointer(window, 'pointermove', 50, 205);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${cId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(true);
+
+    const origDir = view.direction.bind(view);
+    view.direction = () => 'left';
+    pointer(window, 'pointermove', 50, 205);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${cId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(true);
+    view.direction = origDir;
+
+    pointer(window, 'pointercancel', 0, 0);
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointerup', 110, 25);
+    expect(connectPreview(container)?.style.display).toBe('none');
+  });
+
+  it('[TC-2-32-4] connect gesture snaps to valid candidate target node on hover', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    stack(view, editor);
+    const aId = nodeId(editor, 'a');
+    const bId = nodeId(editor, 'b');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointermove', 130, 40);
+
+    view.hit = undefined;
+    pointer(window, 'pointermove', 200, 200);
+    expect(view.element.querySelector('.mm-editor-connect-target')).toBeNull();
+
+    view.hit = { kind: 'node', nodeId: bId };
+    pointer(window, 'pointermove', 50, 85);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${bId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(true);
+
+    view.hit = undefined;
+    const origElementFromPoint = document.elementFromPoint.bind(document);
+    const bNodeEl = view.element.querySelector(`[data-key="node:${bId}"]`);
+    document.elementFromPoint = () => bNodeEl;
+    pointer(window, 'pointermove', 50, 85);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${bId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(true);
+    document.elementFromPoint = origElementFromPoint;
+
+    view.hit = undefined;
+    pointer(window, 'pointermove', 300, 300);
+    expect(
+      view.element
+        .querySelector(`[data-key="node:${bId}"]`)
+        ?.classList.contains('mm-editor-connect-target'),
+    ).toBe(false);
+
+    pointer(window, 'pointercancel', 0, 0);
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointerup', 110, 25);
+    expect(connectPreview(container)?.style.display).toBe('none');
+  });
+
+  it('[TC-2-32-5] releasing connect gesture over valid target node creates relationship edge via createEdge command and selects it', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n');
+    stack(view, editor);
+    const aId = nodeId(editor, 'a');
+    const bId = nodeId(editor, 'b');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointermove', 130, 40);
+    view.hit = { kind: 'node', nodeId: bId };
+    pointer(window, 'pointermove', 50, 85);
+    pointer(window, 'pointerup', 50, 85);
+
+    expect(editor.document.graph?.edges).toHaveLength(1);
+    expect(editor.canUndo).toBe(true);
+    expect(changes).toHaveLength(1);
+    expect(editor.selectedRelation).not.toBeNull();
+    const rf = relationField(container);
+    expect(rf?.style.display).toBe('block');
+    rf?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(rf?.style.display).toBe('none');
+  });
+
+  it('[TC-2-32-6] releasing connect gesture over empty space or pressing Escape cancels the connect gesture', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    stack(view, editor);
+    const aId = nodeId(editor, 'a');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointermove', 130, 40);
+    view.hit = undefined;
+    pointer(window, 'pointerup', 200, 200);
+    expect(editor.document.graph?.edges).toHaveLength(0);
+    expect(connectPreview(container)?.style.display).toBe('none');
+
+    pointer(handle, 'pointerdown', 110, 25);
+    pointer(window, 'pointermove', 130, 40);
+    expect(connectPreview(container)?.style.display).toBe('block');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(connectPreview(container)?.style.display).toBe('none');
+    expect(editor.document.graph?.edges).toHaveLength(0);
+  });
+
+  it('[TC-2-32-7] clicking a relationship arrow selects it and clicking empty space deselects it', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    syncRelationElements(view, editor);
+    const relEl = view.element.querySelector('[data-key="relation:a:b"]');
+    if (!relEl) throw new Error('No relation element');
+
+    relEl.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+    expect(editor.selected).toBeNull();
+    expect(relEl.classList.contains('mm-editor-relation-selected')).toBe(true);
+
+    view.hit = undefined;
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selectedRelation).toBeNull();
+    expect(relEl.classList.contains('mm-editor-relation-selected')).toBe(false);
+  });
+
+  it('[TC-2-32-8] pressing Delete or Backspace while relationship arrow is selected deletes the arrow without deleting endpoint nodes', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    syncRelationElements(view, editor);
+    const relEl = view.element.querySelector('[data-key="relation:a:b"]');
+    if (!relEl) throw new Error('No relation element');
+
+    relEl.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+
+    key(container, 'Delete');
+    expect(editor.document.graph?.edges).toHaveLength(0);
+    expect(editor.document.nodes.size).toBe(3);
+    expect(editor.source).not.toContain('<!-- ^a -->');
+    expect(editor.source).not.toContain('<!-- ^b -->');
+    expect(editor.source).not.toContain('markmap: graph');
+    expect(editor.selectedRelation).toBeNull();
+    expect(editor.canUndo).toBe(true);
+
+    const aId = nodeId(editor, 'a');
+    const bId = nodeId(editor, 'b');
+    editor.createEdge(aId, bId);
+    const edge = editor.document.graph?.edges[0];
+    if (!edge) {
+      throw new Error('No edge');
+    }
+    editor.setEdgeLabel(edge.from, edge.to, 'direct call');
+    expect(editor.document.graph?.edges[0]?.label).toBe('direct call');
+    editor.deleteEdge(edge.from, edge.to);
+    expect(editor.document.graph?.edges).toHaveLength(0);
+  });
+
+  it('[TC-2-32-9] pressing Enter, Space, or double-clicking arrow opens inline label editor overlay and updates label via setEdgeLabel', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    syncRelationElements(view, editor);
+    const relEl = view.element.querySelector('[data-key="relation:a:b"]');
+    if (!relEl) throw new Error('No relation element');
+
+    relEl.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+    const rf = relationField(container);
+    if (!rf) throw new Error('No relation field');
+    expect(rf.style.display).toBe('block');
+
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(rf.style.display).toBe('none');
+    expect(editor.document.graph?.edges[0]?.label ?? null).toBeNull();
+
+    key(container, 'Enter');
+    expect(rf.style.display).toBe('block');
+    rf.value = 'depends on';
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(rf.style.display).toBe('none');
+    expect(editor.document.graph?.edges[0]?.label).toBe('depends on');
+    expect(editor.source).toContain('depends on');
+    expect(editor.canUndo).toBe(true);
+
+    key(container, ' ');
+    expect(rf.style.display).toBe('block');
+    rf.value = '';
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(editor.document.graph?.edges[0]?.label ?? null).toBeNull();
+    expect(editor.source).not.toContain('label:');
+
+    key(container, 'Enter');
+    expect(rf.style.display).toBe('block');
+    rf.value = 'blurred';
+    rf.dispatchEvent(new FocusEvent('blur'));
+    expect(rf.style.display).toBe('none');
+    expect(editor.document.graph?.edges[0]?.label).toBe('blurred');
+
+    key(container, 'Enter');
+    expect(rf.style.display).toBe('block');
+    rf.value = 'blurred';
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(rf.style.display).toBe('none');
+
+    const firstId = editor.document.order[0];
+    if (!firstId) {
+      throw new Error('No first node');
+    }
+    view.hidden.add(firstId);
+    editor.startEditingRelationLabel();
+    expect(rf.style.display).toBe('block');
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    view.hidden.delete(firstId);
+
+    editor.setEdgeLabel('a', 'b', 'labeled');
+    syncRelationElements(view, editor);
+    const updatedRelEl = view.element.querySelector('[data-key="relation:a:b"]');
+    const labelGroup = updatedRelEl?.querySelector('.mm-relation-label');
+    if (!labelGroup) {
+      throw new Error('No label group');
+    }
+    labelGroup.getBoundingClientRect = () => ({
+      x: 100,
+      y: 100,
+      width: 50,
+      height: 20,
+      top: 100,
+      left: 100,
+      right: 150,
+      bottom: 120,
+      toJSON: () => {},
+    });
+    editor.startEditingRelationLabel();
+    expect(rf.style.display).toBe('block');
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    labelGroup.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      toJSON: () => {},
+    });
+    const origScreenRect = view.screenRect.bind(view);
+    view.screenRect = () => undefined;
+    editor.startEditingRelationLabel();
+    expect(rf.style.left).toBe('50%');
+    expect(rf.style.top).toBe('50%');
+    view.screenRect = origScreenRect;
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    editor.selectRelation({ from: 'root', to: 'b' });
+    editor.startEditingRelationLabel();
+    expect(rf.style.display).toBe('block');
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    editor.selectRelation({ from: 'a', to: 'root' });
+    editor.startEditingRelationLabel();
+    expect(rf.style.display).toBe('block');
+    rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    editor.selectRelation(null);
+    rf.style.display = 'block';
+    rf.dispatchEvent(new FocusEvent('blur'));
+    expect(rf.style.display).toBe('none');
   });
 });
 

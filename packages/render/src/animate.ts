@@ -97,5 +97,12 @@ export function interpolateStates(
     const old = fromGroups.get(g.id);
     return old ? { ...g, rect: lerpRect(old.rect, g.rect, t) } : g;
   });
-  return { ...frame, groups };
+  return {
+    ...frame,
+    groups,
+    rootId: to.rootId,
+    relations: to.relations,
+    identities: to.identities,
+    folded: to.folded,
+  };
 }

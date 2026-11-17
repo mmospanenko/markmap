@@ -27,6 +27,7 @@ export function createEditView(mm: Markmap): EditView {
       return mm.foldedIds;
     },
     setTree: (root) => mm.setTree(root),
+    setGraph: (graph, identities) => mm.setGraph(graph, identities),
     setFolded: (id, folded) => mm.setFolded(id, folded),
     setFoldedIds: (ids, options) => mm.setFoldedIds(ids, options),
     toggle: (id) => mm.toggle(id),
