@@ -889,16 +889,37 @@ function childHeadingLevel(parent: EditNode): number {
 }
 
 function childListIndent(doc: Document, parent: EditNode): string {
-  if (parent.kind === 'listItem') return childIndent(doc, parent);
   for (const id of parent.children) {
     const child = doc.nodes.get(id);
     if (child?.kind === 'listItem' && child.list) return child.list.indent;
   }
-  return '';
+  if (parent.kind !== 'listItem' || !parent.list) return '';
+  const unit = doc.unit;
+  const indent = parent.list.indent;
+  if (unit === '\t' || unit.length >= parent.list.marker.length + 1) return indent + unit;
+  return indent + ' '.repeat(parent.list.marker.length + 1);
+}
+
+function reindentListTo(
+  text: string,
+  fromIndent: string,
+  toIndent: string,
+  ending: string,
+): string {
+  if (fromIndent === toIndent) return text;
+  return text
+    .split(ending)
+    .map((line) => {
+      if (!line.trim()) return line;
+      if (!line.startsWith(fromIndent)) return line;
+      return toIndent + line.slice(fromIndent.length);
+    })
+    .join(ending);
 }
 
 function trimBlockEdges(block: string, ending: string): string {
   const lines = block.split(ending);
+  while (!lines[0]?.trim()) lines.shift();
   while (!lines[lines.length - 1]?.trim()) lines.pop();
   return lines.join(ending);
 }
@@ -908,6 +929,7 @@ function cutForMove(source: string, node: EditNode, block: Range): Range {
   if (node.kind !== 'listItem') return cut;
   if (cut.end >= source.length) {
     const start = lineStart(source, cut.start);
+    if (start === 0) return cut;
     const previous = lineStart(source, start - 1);
     if (!source.slice(previous, start).trim()) return { start: previous, end: cut.end };
     return cut;
@@ -976,14 +998,14 @@ function planMove(doc: Document, node: EditNode, parentId: string, index: number
     }
   } else if (node.kind === 'listItem' && list) {
     if (parent.kind === 'listItem') {
-      moved = reindentList(block, childListIndent(doc, parent).length - list.indent.length, ending);
+      moved = reindentListTo(block, list.indent, childListIndent(doc, parent), ending);
     } else if (previous?.kind === 'heading') {
       if (labelText(doc, node).includes('\n')) {
         throw new EditError('E_LABEL', 'A heading label cannot contain a line break', node.id);
       }
       moved = listToHeadings(block, childHeadingLevel(parent), ending);
     } else {
-      moved = reindentList(block, childListIndent(doc, parent).length - list.indent.length, ending);
+      moved = reindentListTo(block, list.indent, childListIndent(doc, parent), ending);
     }
   } else {
     throw new EditError('E_CAPABILITY', 'The node cannot be moved', node.id);
@@ -1086,9 +1108,9 @@ function moveNodeBlock(
         : shiftHeadings(block, childHeadingLevel(parent) - node.level, ending);
     return { text: trimBlockEdges(text, ending), heading: parent.kind !== 'listItem' };
   }
-  const indent = block.length - block.trimStart().length;
+  const indent = node.list?.indent ?? /^[ \t]*/u.exec(block)?.[0] ?? '';
   if (parent.kind === 'listItem') {
-    const text = reindentList(block, childListIndent(doc, parent).length - indent, ending);
+    const text = reindentListTo(block, indent, childListIndent(doc, parent), ending);
     return { text: trimBlockEdges(text, ending), heading: false };
   }
   if (afterHeading) {
@@ -1098,7 +1120,7 @@ function moveNodeBlock(
     const text = listToHeadings(block, childHeadingLevel(parent), ending);
     return { text: trimBlockEdges(text, ending), heading: true };
   }
-  const text = reindentList(block, childListIndent(doc, parent).length - indent, ending);
+  const text = reindentListTo(block, indent, childListIndent(doc, parent), ending);
   return { text: trimBlockEdges(text, ending), heading: false };
 }
 
@@ -1111,6 +1133,13 @@ function joinMovedBlocks(blocks: readonly MovedBlock[], ending: string): string 
     text += block.text;
   }
   return text;
+}
+
+function comparableLabel(doc: Document, node: EditNode): string {
+  return labelText(doc, node)
+    .split(/\r?\n/u)
+    .map((line) => line.trimStart())
+    .join('\n');
 }
 
 function planMoveNodes(
@@ -1224,6 +1253,29 @@ function planMoveNodes(
     verify(next) {
       if (contentNodeCount(next) !== contentNodeCount(doc)) {
         throw shape('The batch move changed the node count');
+      }
+      if (items.length !== ids.length) {
+        throw shape('The batch move lost a selected block');
+      }
+      const target = parent.block
+        ? nodeByBlockStart(next, mapOffset(edits, parent.block.start))
+        : next.nodes.get(next.root);
+      if (!target) throw shape('The batch move lost the target');
+      const children = target.children.slice(index, index + ids.length);
+      if (children.length !== ids.length) {
+        throw shape('The batch move did not place every moved node');
+      }
+      for (let offset = 0; offset < items.length; offset += 1) {
+        const child = next.nodes.get(children[offset]);
+        if (!child || child.parent !== target.id) {
+          throw shape('The moved node has the wrong parent');
+        }
+        if (comparableLabel(next, child) !== comparableLabel(doc, items[offset].node)) {
+          throw shape('The moved label changed');
+        }
+        if (countSubtree(next, child) !== countSubtree(doc, items[offset].node)) {
+          throw shape('The moved subtree changed');
+        }
       }
     },
   };

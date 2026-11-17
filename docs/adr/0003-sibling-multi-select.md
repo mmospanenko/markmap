@@ -23,7 +23,7 @@ Multi-selection is a sibling range under one parent. The editor keeps an anchor 
 
 Group operations are two commands in `@markmap/edit`: batch delete and batch move. Each command takes the selected sibling ids, checks one parent and every capability before it plans splices, applies one plan, parses and validates once. A rejected set throws `EditError` and leaves the input snapshot untouched.
 
-- Batch delete removes each selected block with descendants and notes. It selects the nearest previous unselected sibling, or the parent when none remains.
+- Batch delete removes each selected block with descendants and notes. It selects the nearest previous unselected sibling, the parent when it has a source label or block, otherwise the next surviving sibling or the document end.
 - Batch move treats the selected blocks as one contiguous block in their current order. The index is the final position after every selected node is removed. Heading levels and list indents follow the destination as in a single move.
 - The editor records one history entry per group operation. A drag that starts on a selected node moves the group; a drag that starts elsewhere keeps the single-node path.
 - The moved block stays selected with its first node as the anchor. History stores the selection of each state, so undo and redo restore the group that belonged to the restored source, including the group removed by a group delete.

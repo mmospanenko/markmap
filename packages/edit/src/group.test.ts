@@ -289,4 +289,23 @@ describe('sibling group commands', () => {
       ).code,
     ).toBe('E_SHAPE');
   });
+
+  it('[TC-1-19-12] nests a batch move under an ordered list item with a marker-width indent', () => {
+    const result = moveNodes(buildDocument('1. p\n- a\n- b\n'), ['a', 'b'], 'p', 0);
+    const parent = find(result.document, 'p');
+    expect(result.document.source).toBe('1. p\n   - a\n   - b\n');
+    expect(find(result.document, 'a').parent).toBe(parent.id);
+    expect(find(result.document, 'b').parent).toBe(parent.id);
+    expect(labelAt(result)).toBe('a');
+  });
+
+  it('[TC-1-19-13] keeps a tab-indented existing child under its parent in a batch move', () => {
+    const result = moveNodes(buildDocument('- p\n\t- x\n- a\n- b\n'), ['a', 'b'], 'p', 0);
+    const parent = find(result.document, 'p');
+    expect(result.document.source).toBe('- p\n\t- a\n\t- b\n\t- x\n');
+    expect(find(result.document, 'a').parent).toBe(parent.id);
+    expect(find(result.document, 'b').parent).toBe(parent.id);
+    expect(find(result.document, 'x').parent).toBe(parent.id);
+    expect(labelAt(result)).toBe('a');
+  });
 });
