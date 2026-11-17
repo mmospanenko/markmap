@@ -36,6 +36,7 @@ export interface GroupPrimitive extends PrimitiveBase {
   /** Identity for patching and animation, unique among all groups. */
   key?: string;
   nodeId?: string;
+  groupId?: string;
   transform?: Matrix;
   opacity?: number;
   /** Hide what falls outside this rectangle, in the group's own coordinates. */

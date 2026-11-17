@@ -15,9 +15,10 @@ class FakeView implements EditView {
   pans: Array<[number, number]> = [];
   folded = new Set<string>();
   tree?: MarkmapNode;
-  hit: { kind: string; nodeId?: string } | undefined;
+  hit: { kind: string; nodeId?: string; groupId?: string } | undefined;
   focused: string[] = [];
   rects = new Map<string, Rect | undefined>();
+  groupRects = new Map<string | number, Rect | undefined>();
   directions = new Map<string, Side>();
   labels = new Map<string, EditLabelStyle>();
   defaultDirection: Side | undefined;
@@ -72,6 +73,11 @@ class FakeView implements EditView {
     return { x: 10, y: 20, width: 100, height: 30 };
   }
 
+  groupScreenRect(id: string | number): Rect | undefined {
+    if (this.groupRects.has(id)) return this.groupRects.get(id);
+    return { x: 50, y: 60, width: 200, height: 100 };
+  }
+
   direction(id: string): Side | undefined {
     return this.directions.get(id) ?? this.defaultDirection;
   }
@@ -80,7 +86,7 @@ class FakeView implements EditView {
     return this.labels.get(id);
   }
 
-  hitAt(): { kind: string; nodeId?: string } | undefined {
+  hitAt(): { kind: string; nodeId?: string; groupId?: string } | undefined {
     return this.hit;
   }
 
@@ -2138,6 +2144,7 @@ describe('createEditView', () => {
       toggle: vi.fn<(id: string) => void>(),
       focusNode: vi.fn<(id: string, options?: { animate?: boolean }) => boolean>(),
       screenRect: vi.fn<(id: string) => Rect | undefined>(),
+      groupScreenRect: vi.fn<(id: string | number) => Rect | undefined>(),
       result: { layout: { byId: new Map([['a', { direction: 'left' as const }]]) } },
       hitAt: vi.fn<(x: number, y: number) => { kind: string; nodeId?: string } | undefined>(),
       layoutPoint: vi.fn<(clientX: number, clientY: number) => [number, number]>(),
@@ -2160,6 +2167,7 @@ describe('createEditView', () => {
     view.toggle('a');
     view.focusNode('a', { animate: false });
     view.screenRect('a');
+    view.groupScreenRect?.('group-0');
     view.hitAt(1, 2);
     view.layoutPoint(1, 2);
     view.on('render', () => {});
@@ -2168,6 +2176,7 @@ describe('createEditView', () => {
     expect(mm.setFoldedIds).toHaveBeenCalledWith(['a'], undefined);
     expect(mm.toggle).toHaveBeenCalledWith('a');
     expect(mm.focusNode).toHaveBeenCalledWith('a', { animate: false });
+    expect(mm.groupScreenRect).toHaveBeenCalledWith('group-0');
     expect(mm.on).toHaveBeenCalledWith('render', expect.any(Function));
   });
 });
@@ -3804,5 +3813,147 @@ describe('sibling multi-selection', () => {
     expect(selectedLabels(view, editor)).toEqual(['B', 'D']);
     expect(editor.selected).toBe(nodeId(editor, 'B'));
     expect(editor.canUndo).toBe(false);
+  });
+});
+
+describe('group boundary selection and editing', () => {
+  it('[TC-2-30-1] creates group boundary for selected node and contiguous siblings', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    view.hit = undefined;
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(editor.createGroup()).toBe(false);
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    const created = editor.createGroup('My Group');
+    expect(created).toBe(true);
+    expect(editor.document.graph.groups).toHaveLength(1);
+    expect(editor.document.graph.groups[0].label).toBe('My Group');
+    expect(editor.selectedBoundary).toBe(0);
+  });
+
+  it('[TC-2-30-2] selects group boundary on click and highlights group', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, view, editor } = setup(source);
+    const groupEl = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    groupEl.setAttribute('data-group-id', 'group-0');
+    view.element.append(groupEl);
+    view.hit = { kind: 'group', groupId: 'group-0' };
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 55, clientY: 65 }));
+    expect(editor.selectedBoundary).toBe(0);
+    expect(editor.selected).toBeNull();
+    expect(groupEl.classList.contains('mm-editor-group-selected')).toBe(true);
+
+    editor.selectBoundary(0);
+    view.hit = undefined;
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 0, clientY: 0 }));
+    expect(editor.selectedBoundary).toBeNull();
+    expect(groupEl.classList.contains('mm-editor-group-selected')).toBe(false);
+
+    editor.selectBoundary(null);
+    editor.selectBoundary(0);
+    editor.selectBoundary(0);
+    view.hit = { kind: 'group', groupId: 'group-99' };
+    container.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 55, clientY: 65 }));
+  });
+
+  it('[TC-2-30-3] deletes group boundary on Delete or Backspace without deleting nodes', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, editor } = setup(source);
+    expect(editor.deleteGroup()).toBe(false);
+    expect(editor.deleteGroup(99)).toBe(false);
+    editor.selectBoundary(0);
+    expect(editor.selectedBoundary).toBe(0);
+    key(container, 'Delete');
+    expect(editor.document.graph.groups).toHaveLength(0);
+    expect(editor.document.nodes.size).toBe(2);
+    expect(editor.selectedBoundary).toBeNull();
+  });
+
+  it('[TC-2-30-4] clears group boundary selection on Escape', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, view, editor } = setup(source);
+    const groupEl = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    groupEl.setAttribute('data-group-id', 'group-0');
+    view.element.append(groupEl);
+    editor.selectBoundary(0);
+    expect(editor.selectedBoundary).toBe(0);
+    expect(groupEl.classList.contains('mm-editor-group-selected')).toBe(true);
+    key(container, 'Escape');
+    expect(editor.selectedBoundary).toBeNull();
+    expect(groupEl.classList.contains('mm-editor-group-selected')).toBe(false);
+  });
+
+  it('[TC-2-30-5] edits group label with inline overlay on Enter or double click', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, view, editor } = setup(source);
+    expect(editor.setGroupLabel(-1, 'X')).toBe(false);
+    expect(editor.setGroupLabel(99, 'X')).toBe(false);
+    editor.editGroupLabel(-1);
+    editor.editGroupLabel(undefined);
+    view.hit = { kind: 'group', groupId: 'group-99' };
+    container.dispatchEvent(
+      new MouseEvent('dblclick', { bubbles: true, clientX: 55, clientY: 65 }),
+    );
+    editor.selectBoundary(0);
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    view.emit('render');
+    const input = field(container);
+    expect(input.value).toBe('G1');
+    input.value = 'Updated G1';
+    key(input, 'Enter');
+    expect(editor.document.graph.groups[0].label).toBe('Updated G1');
+    expect(editor.isEditing).toBe(false);
+
+    view.hit = { kind: 'group', groupId: 'group-0' };
+    container.dispatchEvent(
+      new MouseEvent('dblclick', { bubbles: true, clientX: 55, clientY: 65 }),
+    );
+    expect(editor.isEditing).toBe(true);
+    expect(input.value).toBe('Updated G1');
+  });
+
+  it('[TC-2-30-6] cancels group label editing on Escape', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, view, editor } = setup(source);
+    editor.selectBoundary(0);
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    view.groupRects.set(0, undefined);
+    view.emit('render');
+    expect(editor.isEditing).toBe(false);
+
+    view.groupRects.delete(0);
+    editor.selectBoundary(0);
+    key(container, 'Enter');
+    expect(editor.isEditing).toBe(true);
+    const input = field(container);
+    input.value = 'Cancelled Label';
+    key(input, 'Escape');
+    expect(editor.isEditing).toBe(false);
+    expect(editor.document.graph.groups[0].label).toBe('G1');
+  });
+
+  it('[TC-2-30-7] restores group boundary selection and document on undo and redo', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, editor } = setup(source);
+    editor.selectBoundary(0);
+    key(container, 'Backspace');
+    expect(editor.document.graph.groups).toHaveLength(0);
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.document.graph.groups).toHaveLength(1);
+    expect(editor.document.graph.groups[0].label).toBe('G1');
+    expect(editor.selectedBoundary).toBe(0);
+
+    key(container, 'z', { metaKey: true, shiftKey: true });
+    expect(editor.document.graph.groups).toHaveLength(0);
+    expect(editor.selectedBoundary).toBeNull();
   });
 });

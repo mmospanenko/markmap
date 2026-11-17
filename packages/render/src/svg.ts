@@ -113,6 +113,7 @@ function serialize(primitives: Primitive[], options: PrimitivesToSVGOptions): st
           transform: p.transform && `matrix(${p.transform.map(num).join(' ')})`,
           opacity: p.opacity,
           'data-node-id': p.nodeId,
+          'data-group-id': p.groupId,
         })}>${p.clip ? clipped(content, p.clip) : content}</g>`;
         break;
       }

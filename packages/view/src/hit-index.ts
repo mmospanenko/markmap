@@ -7,8 +7,8 @@ export type HitTarget =
   /** A `hit` primitive: a view action such as opening notes. */
   | { kind: 'action'; nodeId: string; action: string }
   | { kind: 'link'; nodeId?: string; href: string }
-  /** A node's box, where nothing more specific was hit. */
-  | { kind: 'node'; nodeId: string };
+  | { kind: 'node'; nodeId: string }
+  | { kind: 'group'; groupId: string };
 
 export interface HitIndexOptions {
   /** Fold anchors, in layout coordinates. */
@@ -17,6 +17,7 @@ export interface HitIndexOptions {
   toggleRadius?: number;
   /** Node boxes, in layout coordinates and drawing order. */
   nodes?: readonly { nodeId: string; rect: Rect }[];
+  groups?: readonly { groupId: string; rect: Rect }[];
   /** Leave out targets of nodes this returns `false` for, such as nodes on their way out. */
   include?: (nodeId: string) => boolean;
 }
@@ -51,6 +52,9 @@ export class HitIndex {
     const visit = (list: readonly Primitive[], matrix: Matrix, nodeId?: string) => {
       for (const p of list) {
         if (p.kind === 'group') {
+          if (p.groupId && p.bounds) {
+            add({ kind: 'group', groupId: p.groupId }, transformRect(matrix, p.bounds));
+          }
           const id = p.nodeId ?? nodeId;
           if (id && !include(id)) continue;
           visit(p.children, p.transform ? multiply(matrix, p.transform) : matrix, id);
@@ -73,6 +77,9 @@ export class HitIndex {
     for (const { nodeId, rect } of options.nodes ?? []) {
       if (include(nodeId)) add({ kind: 'node', nodeId }, rect);
     }
+    for (const { groupId, rect } of options.groups ?? []) {
+      add({ kind: 'group', groupId }, rect);
+    }
     if (!boxes.length) return;
     this.index = new Flatbush(boxes.length);
     for (const box of boxes) this.index.add(box.x, box.y, box.x + box.width, box.y + box.height);
@@ -88,9 +95,14 @@ export class HitIndex {
     if (!this.index) return undefined;
     let top = -1;
     let node = -1;
+    let group = -1;
     let toggle: { index: number; distance: number } | undefined;
     for (const i of this.index.search(x, y, x, y)) {
       const { center, target } = this.entries[i];
+      if (target.kind === 'group') {
+        group = Math.max(group, i);
+        continue;
+      }
       if (target.kind === 'node') {
         node = Math.max(node, i);
         continue;
@@ -104,7 +116,7 @@ export class HitIndex {
         toggle = { index: i, distance };
       }
     }
-    const found = top >= 0 ? top : (toggle?.index ?? node);
+    const found = top >= 0 ? top : (toggle?.index ?? (node >= 0 ? node : group));
     return found < 0 ? undefined : this.entries[found].target;
   }
 }

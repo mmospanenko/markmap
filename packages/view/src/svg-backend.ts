@@ -69,6 +69,7 @@ export class SvgDomBackend implements ViewBackend {
       setAttr(el, 'transform', isGroup && p.transform ? `matrix(${p.transform.join(' ')})` : null);
       setAttr(el, 'opacity', isGroup && p.opacity != null ? String(p.opacity) : null);
       setAttr(el, 'data-node-id', isGroup ? (p.nodeId ?? null) : null);
+      setAttr(el, 'data-group-id', isGroup ? (p.groupId ?? null) : null);
       setAttr(el, 'data-key', key);
 
       const content = !isGroup

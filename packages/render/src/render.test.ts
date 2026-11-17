@@ -5,11 +5,15 @@ import { parse } from '@markmap/parse';
 import { describe, expect, it } from 'vitest';
 import {
   approximateMeasurer,
+  classicTheme,
+  interpolateStates,
   layoutTree,
+  orgChartLayout,
   primitiveBounds,
   primitivesToSVG,
   renderTree,
   toSVGString,
+  twoSidedLayout,
 } from '.';
 
 const sample = readFileSync(join(import.meta.dirname, '../test/sample.md'), 'utf8');
@@ -211,5 +215,125 @@ describe('custom layouts', () => {
     // From the root's left end to the child's right end.
     expect(d.startsWith(`M${r.rect.x},`)).toBe(true);
     expect(d).toContain(`,${a.rect.x + a.rect.width},`);
+  });
+});
+
+describe('group boundaries', () => {
+  it('[TC-1-23-1] renders group boundary as underlay behind nodes and lines with label text', () => {
+    const root = parse('# Root\n\n- A\n  - A1\n- B').root;
+    const aNode = root.children[0];
+    const { primitives } = renderTree(root, {
+      measurer: approximateMeasurer,
+      groups: [{ id: 'g1', roots: [aNode.id], label: 'Alpha' }],
+    });
+    const underlay = primitives[0];
+    expect(underlay.kind).toBe('group');
+    if (underlay.kind !== 'group') throw new Error('Not group');
+    expect(underlay.key).toBe('group:g1');
+    expect(underlay.groupId).toBe('g1');
+    expect(underlay.children).toHaveLength(2);
+    expect(underlay.children[0].kind).toBe('rect');
+    expect(underlay.children[1].kind).toBe('text');
+  });
+
+  it('[TC-1-23-2] computes bounding box enclosing all visible nodes in group subtree', () => {
+    const root = parse('# Root\n\n- A\n  - A1\n  - A2\n- B').root;
+    const aNode = root.children[0];
+    const { layout, state } = renderTree(root, {
+      measurer: approximateMeasurer,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    const aItem = layout.byId.get(aNode.id);
+    const a1Item = layout.byId.get(aNode.children[0].id);
+    const a2Item = layout.byId.get(aNode.children[1].id);
+    if (!aItem || !a1Item || !a2Item) throw new Error('Nodes missing in layout');
+    const aRect = aItem.rect;
+    const a1Rect = a1Item.rect;
+    const a2Rect = a2Item.rect;
+    const group = state.groups?.[0];
+    if (!group) throw new Error('Group missing');
+    expect(group.rect.x).toBeLessThan(aRect.x);
+    expect(group.rect.x + group.rect.width).toBeGreaterThanOrEqual(
+      Math.max(a1Rect.x + a1Rect.width, a2Rect.x + a2Rect.width),
+    );
+  });
+
+  it('[TC-1-23-3] uses layout-aware padding for tree, two-sided and org-chart', () => {
+    const root = parse('# Root\n\n- A\n  - A1').root;
+    const aNode = root.children[0];
+    const treeRes = renderTree(root, {
+      measurer: approximateMeasurer,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    const orgRes = renderTree(root, {
+      measurer: approximateMeasurer,
+      layout: orgChartLayout,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    const twoRes = renderTree(root, {
+      measurer: approximateMeasurer,
+      layout: twoSidedLayout,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    const treeGroup = treeRes.state.groups?.[0];
+    const orgGroup = orgRes.state.groups?.[0];
+    const twoGroup = twoRes.state.groups?.[0];
+    if (!treeGroup || !orgGroup || !twoGroup) throw new Error('Groups missing');
+    expect(treeGroup.rect.height).not.toBe(orgGroup.rect.height);
+    expect(twoGroup.rect).toBeDefined();
+  });
+
+  it('[TC-1-23-4] hides group boundary when root or ancestor is folded', () => {
+    const root = parse('# Root\n\n- A\n  - A1\n- B').root;
+    const aNode = root.children[0];
+    const foldedRoot = renderTree(root, {
+      measurer: approximateMeasurer,
+      folded: new Set(['root']),
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    expect(foldedRoot.state.groups).toHaveLength(0);
+
+    const foldedA = renderTree(root, {
+      measurer: approximateMeasurer,
+      folded: new Set([aNode.id]),
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    expect(foldedA.state.groups).toHaveLength(0);
+  });
+
+  it('[TC-1-23-5] draws rounded rectangle with accent border and semi-transparent fill tokens', () => {
+    const root = parse('# Root\n\n- A').root;
+    const aNode = root.children[0];
+    const { primitives } = renderTree(root, {
+      measurer: approximateMeasurer,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    const rect = primitives[0].kind === 'group' ? primitives[0].children[0] : null;
+    expect(rect).toMatchObject({
+      kind: 'rect',
+      r: 8,
+      fill: 'var(--mm-group-fill)',
+      stroke: 'var(--mm-group-border)',
+      strokeWidth: 1.5,
+    });
+  });
+
+  it('[TC-1-23-6] interpolates group boundaries across animation frames', () => {
+    const root = parse('# Root\n\n- A').root;
+    const aNode = root.children[0];
+    const state1 = renderTree(root, {
+      measurer: approximateMeasurer,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    }).state;
+    const g1 = state1.groups?.[0];
+    if (!g1) throw new Error('Missing group in state1');
+    const state2 = {
+      ...state1,
+      groups: [{ ...g1, rect: { x: 100, y: 100, width: 200, height: 200 } }],
+    };
+    const interpolated = interpolateStates(state1, state2, 0.5, classicTheme);
+    const interpGroup = interpolated.groups?.[0];
+    if (!interpGroup) throw new Error('Missing group in interpolated state');
+    expect(interpGroup.rect.x).toBe((g1.rect.x + 100) / 2);
   });
 });

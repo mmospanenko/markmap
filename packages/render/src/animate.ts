@@ -89,7 +89,13 @@ export function interpolateStates(
   layout?: Layout,
 ): DrawState {
   const interpolate = layout?.interpolate ?? interpolateFrames;
-  return interpolate(from, to, t, {
+  const frame = interpolate(from, to, t, {
     anchor: (item, side) => theme.node.anchor(item.rect, side, item.ctx),
   });
+  const fromGroups = new Map((from.groups ?? []).map((g) => [g.id, g]));
+  const groups = (to.groups ?? []).map((g) => {
+    const old = fromGroups.get(g.id);
+    return old ? { ...g, rect: lerpRect(old.rect, g.rect, t) } : g;
+  });
+  return { ...frame, groups };
 }
