@@ -127,6 +127,26 @@ describe('toSVGString', () => {
     await expect(svg).toMatchFileSnapshot('../test/snapshots/sample.svg');
   });
 
+  it('[TC-1-23-16] serializes dash arrays only for stroked primitives', () => {
+    const svg = primitivesToSVG([
+      {
+        kind: 'rect',
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+        fill: 'red',
+        stroke: 'blue',
+        strokeDashArray: [5, 4],
+      },
+      { kind: 'path', d: 'M0,0H2', stroke: 'green' },
+      { kind: 'rect', x: 2, y: 2, w: 1, h: 1, fill: 'red', strokeDashArray: [5, 4] },
+    ]);
+    expect(svg).toBe(
+      '<rect x="0" y="0" width="1" height="1" style="fill:red;stroke:blue;stroke-dasharray:5 4"/><path d="M0,0H2" style="fill:none;stroke:green"/><rect x="2" y="2" width="1" height="1" style="fill:red"/>',
+    );
+  });
+
   it('escapes text and attributes', () => {
     const svg = toSVGString(render('- 1 < 2 & "a" \'b\' [x](https://a.b/?q=1&r=2)'));
     expect(svg).toContain('1 &lt; 2 &amp; &quot;a&quot; &#39;b&#39;');
@@ -318,6 +338,22 @@ describe('group boundaries', () => {
     });
   });
 
+  it('[TC-1-23-15] draws group boundaries with a dashed border and preserves their fill', () => {
+    const root = parse('# Root\n\n- A').root;
+    const aNode = root.children[0];
+    const { primitives } = renderTree(root, {
+      measurer: approximateMeasurer,
+      groups: [{ id: 'g1', roots: [aNode.id] }],
+    });
+    const rect = primitives[0].kind === 'group' ? primitives[0].children[0] : null;
+    expect(rect).toMatchObject({
+      kind: 'rect',
+      fill: 'var(--mm-group-fill)',
+      stroke: 'var(--mm-group-border)',
+      strokeDashArray: [5, 4],
+    });
+  });
+
   it('[TC-1-23-6] interpolates group boundaries across animation frames', () => {
     const root = parse('# Root\n\n- A').root;
     const aNode = root.children[0];
@@ -366,17 +402,30 @@ describe('relationship edges', () => {
     if (!rel || rel.kind !== 'group') throw new Error('No relation group');
     expect(rel.children.length).toBeGreaterThanOrEqual(3);
     const curve = rel.children[0];
-    const arrow = rel.children[1];
-    const rect = rel.children[2];
-    const text = rel.children[3];
+    const hit = rel.children[1];
+    const arrow = rel.children[2];
+    const rect = rel.children[3];
+    const text = rel.children[4];
     expect(curve.kind).toBe('path');
     const pathCurve = curve.kind === 'path' ? curve : undefined;
     expect(pathCurve?.d).toMatch(/^M\d+(\.\d+)?,.*C.*$/);
     expect(pathCurve?.stroke).toBe('var(--mm-edge-relation, #8c959f)');
+    expect(pathCurve?.strokeDashArray).toEqual([5, 4]);
+    expect(hit.kind).toBe('group');
+    if (hit.kind !== 'group') throw new Error('No relation hit group');
+    expect(hit.key).toBe('relation-hit:a:b');
+    expect(hit.children[0]).toMatchObject({
+      kind: 'path',
+      stroke: 'transparent',
+      strokeWidth: 10,
+    });
+    if (hit.children[0]?.kind !== 'path') throw new Error('No relation hit path');
+    expect(hit.children[0].strokeDashArray).toBeUndefined();
     expect(arrow.kind).toBe('path');
     const pathArrow = arrow.kind === 'path' ? arrow : undefined;
     expect(pathArrow?.d).toMatch(/^M\d+(\.\d+)?,.*L.*L.*Z$/);
     expect(pathArrow?.fill).toBe('var(--mm-edge-relation, #8c959f)');
+    expect(pathArrow?.strokeDashArray).toBeUndefined();
     expect(rect.kind).toBe('rect');
     const rectShape = rect.kind === 'rect' ? rect : undefined;
     expect(rectShape?.fill).toBe('var(--mm-bg, #ffffff)');
@@ -385,6 +434,9 @@ describe('relationship edges', () => {
     const textShape = text.kind === 'text' ? text : undefined;
     expect(textShape?.runs[0]?.text).toBe('relates to');
     expect(textShape?.runs[0]?.fill).toBe('var(--mm-edge-relation-label, #57606a)');
+    const svg = primitivesToSVG(result.primitives);
+    expect(svg).toContain('stroke-dasharray:5 4');
+    expect(svg).toContain('fill:var(--mm-edge-relation, #8c959f)');
   });
 
   it('[TC-2-31-2] hides relationship edge when endpoint is folded', () => {
@@ -467,7 +519,8 @@ describe('relationship edges', () => {
     });
     const rel = result.primitives.find((p) => p.kind === 'group' && p.key === 'relation:a:b');
     if (!rel || rel.kind !== 'group') throw new Error('No relation group');
-    expect(rel.children).toHaveLength(2);
+    expect(rel.children).toHaveLength(3);
+    expect(rel.children[1]?.kind).toBe('group');
     expect(rel.children.some((p) => p.kind === 'text')).toBe(false);
   });
 });

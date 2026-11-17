@@ -59,6 +59,7 @@ export interface RectPrimitive extends PrimitiveBase {
   fill?: Paint;
   stroke?: Paint;
   strokeWidth?: number;
+  strokeDashArray?: number[];
 }
 
 export interface PathPrimitive extends PrimitiveBase {
@@ -67,6 +68,7 @@ export interface PathPrimitive extends PrimitiveBase {
   fill?: Paint;
   stroke?: Paint;
   strokeWidth?: number;
+  strokeDashArray?: number[];
 }
 
 /** Pre-wrapped, pre-measured text. */

@@ -51,11 +51,18 @@ function style(values: Record<string, string | number | undefined>): string | un
 }
 
 /** Paints live in `style`, because `var()` is not reliable in presentation attributes. */
-function paint(p: { fill?: string; stroke?: string; strokeWidth?: number }) {
+function paint(p: {
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  strokeDashArray?: number[];
+}) {
   return style({
     fill: p.fill ?? 'none',
     stroke: p.stroke,
     'stroke-width': p.stroke ? p.strokeWidth : undefined,
+    'stroke-dasharray':
+      p.stroke && p.strokeDashArray?.length ? p.strokeDashArray.join(' ') : undefined,
   });
 }
 

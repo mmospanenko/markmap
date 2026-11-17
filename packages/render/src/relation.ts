@@ -11,6 +11,11 @@ import type {
   Theme,
 } from '@markmap/core';
 import type { DrawNode } from './render';
+import {
+  relationAnchorCandidates,
+  routeRelationGeometry,
+  type RelationRouteGeometry,
+} from './relation-geometry';
 import { SYSTEM_FONT } from './themes/shared';
 
 export interface RelationCurve {
@@ -53,13 +58,7 @@ export function computeRelationCurve(
     tanY = p3.y - p0.y;
   }
   const angle = Math.atan2(tanY, tanX);
-  const baseX = p3.x - 8 * Math.cos(angle);
-  const baseY = p3.y - 8 * Math.sin(angle);
-  const w1X = baseX - 4 * Math.sin(angle);
-  const w1Y = baseY + 4 * Math.cos(angle);
-  const w2X = baseX + 4 * Math.sin(angle);
-  const w2Y = baseY - 4 * Math.cos(angle);
-  const arrowD = `M${p3.x},${p3.y}L${w1X},${w1Y}L${w2X},${w2Y}Z`;
+  const arrowD = arrowPathData(p3, angle);
 
   const midX = 0.125 * p0.x + 0.375 * p1.x + 0.375 * p2.x + 0.125 * p3.x;
   const midY = 0.125 * p0.y + 0.375 * p1.y + 0.375 * p2.y + 0.125 * p3.y;
@@ -76,6 +75,9 @@ export interface RenderRelationParams {
   theme: Theme;
 }
 
+const ROUTE_CACHE_LIMIT = 256;
+const routeCache = new Map<string, RelationRouteGeometry>();
+
 export function renderRelationEdges({
   edges,
   identities,
@@ -85,6 +87,13 @@ export function renderRelationEdges({
   theme,
 }: RenderRelationParams): Primitive[] {
   const primitives: Primitive[] = [];
+  const visibleNodes = [...nodesById.values()];
+  const obstacleKey = visibleNodes
+    .map((node) => {
+      const { x, y, width, height } = node.rect;
+      return `${node.node.id},${x},${y},${width},${height}`;
+    })
+    .join(';');
 
   for (const edge of edges) {
     const sourceNodeId =
@@ -99,54 +108,84 @@ export function renderRelationEdges({
     if (!source || !target) continue;
     if (source.ctx.folded || target.ctx.folded) continue;
 
-    const srcCenter = {
-      x: source.rect.x + source.rect.width / 2,
-      y: source.rect.y + source.rect.height / 2,
-    };
-    const tgtCenter = {
-      x: target.rect.x + target.rect.width / 2,
-      y: target.rect.y + target.rect.height / 2,
-    };
-    const dx = tgtCenter.x - srcCenter.x;
-    const dy = tgtCenter.y - srcCenter.y;
-
-    let srcSide: Side;
-    let tgtSide: Side;
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      srcSide = dx >= 0 ? 'right' : 'left';
-      tgtSide = dx >= 0 ? 'left' : 'right';
+    const sourceAnchors = relationAnchorCandidates(source.rect, (side) =>
+      theme.node.anchor(source.rect, side, source.ctx),
+    );
+    const targetAnchors = relationAnchorCandidates(target.rect, (side) =>
+      theme.node.anchor(target.rect, side, target.ctx),
+    );
+    const obstacles = visibleNodes
+      .filter((node) => node.node.id !== sourceNodeId && node.node.id !== targetNodeId)
+      .map((node) => node.rect);
+    const anchorKey = [...sourceAnchors, ...targetAnchors]
+      .map((anchor) => `${anchor.side},${anchor.x},${anchor.y}`)
+      .join(';');
+    const cacheKey = `${edge.from},${edge.to}|${obstacleKey}|${anchorKey}`;
+    const cached = routeCache.get(cacheKey);
+    let geometry: RelationRouteGeometry;
+    if (cached) {
+      routeCache.delete(cacheKey);
+      routeCache.set(cacheKey, cached);
+      geometry = cached;
     } else {
-      srcSide = dy >= 0 ? 'bottom' : 'top';
-      tgtSide = dy >= 0 ? 'top' : 'bottom';
+      geometry = routeRelationGeometry(
+        { rect: source.rect, anchors: sourceAnchors },
+        { rect: target.rect, anchors: targetAnchors },
+        obstacles,
+      );
+      routeCache.set(cacheKey, geometry);
+      if (routeCache.size > ROUTE_CACHE_LIMIT) {
+        const oldest = routeCache.keys().next().value;
+        if (oldest !== undefined) routeCache.delete(oldest);
+      }
     }
-
-    const p0 = theme.node.anchor(source.rect, srcSide, source.ctx);
-    const p3 = theme.node.anchor(target.rect, tgtSide, target.ctx);
-    const curve = computeRelationCurve(p0, p3, srcSide, tgtSide);
+    const arrowD = arrowPathData(geometry.p3, geometry.angle);
 
     const curvePath: PathPrimitive = {
       kind: 'path',
-      d: curve.d,
+      d: geometry.d,
       stroke: 'var(--mm-edge-relation, #8c959f)',
       strokeWidth: 1.5,
+      strokeDashArray: [5, 4],
+    };
+
+    const hitPath: PathPrimitive = {
+      kind: 'path',
+      d: geometry.d,
+      stroke: 'transparent',
+      strokeWidth: 10,
+    };
+
+    const hitGroup = {
+      kind: 'group' as const,
+      key: `relation-hit:${edge.from}:${edge.to}`,
+      bounds: expandBounds(geometry.bounds, 6),
+      children: [hitPath],
     };
 
     const arrowPath: PathPrimitive = {
       kind: 'path',
-      d: curve.arrowD,
+      d: arrowD,
       fill: 'var(--mm-edge-relation, #8c959f)',
     };
 
-    const children: Primitive[] = [curvePath, arrowPath];
+    const children: Primitive[] = [curvePath, hitGroup, arrowPath];
+    let labelBounds: Rect | undefined;
 
     if (edge.label && edge.label.length > 0) {
       const labelText = edge.label;
       const labelWidth = Math.max(28, labelText.length * 7 + 14);
       const labelHeight = 20;
+      labelBounds = {
+        x: geometry.midX - labelWidth / 2,
+        y: geometry.midY - labelHeight / 2,
+        width: labelWidth,
+        height: labelHeight,
+      };
       const rect: RectPrimitive = {
         kind: 'rect',
-        x: curve.midX - labelWidth / 2,
-        y: curve.midY - labelHeight / 2,
+        x: labelBounds.x,
+        y: labelBounds.y,
         w: labelWidth,
         h: labelHeight,
         r: 4,
@@ -161,8 +200,8 @@ export function renderRelationEdges({
         runs: [
           {
             text: labelText,
-            x: curve.midX - (labelText.length * 7) / 2,
-            y: curve.midY + 4,
+            x: geometry.midX - (labelText.length * 7) / 2,
+            y: geometry.midY + 4,
             font: SYSTEM_FONT,
             fill: 'var(--mm-edge-relation-label, #57606a)',
           },
@@ -171,24 +210,67 @@ export function renderRelationEdges({
       children.push(rect, text);
     }
 
-    const minX = Math.min(p0.x, p3.x, curve.midX - 30);
-    const minY = Math.min(p0.y, p3.y, curve.midY - 15);
-    const maxX = Math.max(p0.x, p3.x, curve.midX + 30);
-    const maxY = Math.max(p0.y, p3.y, curve.midY + 15);
-    const bounds: Rect = {
-      x: minX - 10,
-      y: minY - 10,
-      width: maxX - minX + 20,
-      height: maxY - minY + 20,
-    };
+    const bounds = expandBounds(
+      labelBounds ? unionBounds(geometry.bounds, labelBounds) : geometry.bounds,
+      12,
+    );
 
-    primitives.push({
+    const relation: Primitive = {
       kind: 'group',
       key: `relation:${edge.from}:${edge.to}`,
       bounds,
       children,
-    });
+    };
+    const midpointBounds: Rect = {
+      x: geometry.midX - 0.5,
+      y: geometry.midY - 0.5,
+      width: 1,
+      height: 1,
+    };
+    const midpoint = {
+      kind: 'group' as const,
+      key: `relation-midpoint:${edge.from}:${edge.to}`,
+      bounds: midpointBounds,
+      children: [
+        {
+          kind: 'rect' as const,
+          x: midpointBounds.x,
+          y: midpointBounds.y,
+          w: midpointBounds.width,
+          h: midpointBounds.height,
+          fill: 'none',
+        },
+      ],
+    };
+    primitives.push(relation, midpoint);
   }
 
   return primitives;
+}
+
+function arrowPathData(p3: Anchor, angle: number): string {
+  const baseX = p3.x - 8 * Math.cos(angle);
+  const baseY = p3.y - 8 * Math.sin(angle);
+  const w1X = baseX - 4 * Math.sin(angle);
+  const w1Y = baseY + 4 * Math.cos(angle);
+  const w2X = baseX + 4 * Math.sin(angle);
+  const w2Y = baseY - 4 * Math.cos(angle);
+  return `M${p3.x},${p3.y}L${w1X},${w1Y}L${w2X},${w2Y}Z`;
+}
+
+function expandBounds(rect: Rect, padding: number): Rect {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+}
+
+function unionBounds(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
+  return { x, y, width: right - x, height: bottom - y };
 }

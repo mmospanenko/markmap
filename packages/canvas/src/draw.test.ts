@@ -8,6 +8,7 @@ function recorder() {
   const calls: unknown[][] = [];
   const stack: Record<string, unknown>[] = [];
   const state: Record<string, unknown> = { globalAlpha: 1 };
+  let lineDash: number[] = [];
   const record =
     (name: string) =>
     (...args: unknown[]) => {
@@ -28,7 +29,19 @@ function recorder() {
       calls.push(['fill', ctx.fillStyle, ...(path ? [path] : [])]);
     },
     stroke(path?: unknown) {
-      calls.push(['stroke', ctx.strokeStyle, ctx.lineWidth, ...(path ? [path] : [])]);
+      calls.push([
+        'stroke',
+        ctx.strokeStyle,
+        ctx.lineWidth,
+        ...(path ? [path] : []),
+        ...(lineDash.length ? [[...lineDash]] : []),
+      ]);
+    },
+    getLineDash() {
+      return [...lineDash];
+    },
+    setLineDash(value: number[]) {
+      lineDash = [...value];
     },
     drawImage: record('drawImage'),
     save() {
@@ -72,6 +85,31 @@ describe('drawPrimitives', () => {
       ['stroke', 'red', 2],
       ['roundRect', 0, 0, 9, 9, 3],
       ['stroke', '#222', 1, 'M0,0H5'],
+    ]);
+  });
+
+  it('[TC-1-23-17] applies stroke dashes without affecting fills or later solid strokes', () => {
+    const calls = draw([
+      {
+        kind: 'rect',
+        x: 0,
+        y: 0,
+        w: 4,
+        h: 4,
+        fill: 'var(--mm-a)',
+        stroke: 'red',
+        strokeDashArray: [5, 4],
+      },
+      { kind: 'path', d: 'M0,0H1', stroke: 'blue' },
+      { kind: 'rect', x: 5, y: 5, w: 2, h: 2, fill: 'red', strokeDashArray: [5, 4] },
+    ]);
+    expect(calls).toEqual([
+      ['rect', 0, 0, 4, 4],
+      ['fill', '#111'],
+      ['stroke', 'red', 1, [5, 4]],
+      ['stroke', 'blue', 1, 'M0,0H1'],
+      ['rect', 5, 5, 2, 2],
+      ['fill', 'red'],
     ]);
   });
 
