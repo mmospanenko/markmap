@@ -356,4 +356,28 @@ describe('graph errors', () => {
     expect(error).toBeInstanceOf(EditError);
     expect(doc.source).toBe(source);
   });
+
+  it('[TC-1-22-29] keeps existing convention issues without failing on offset shifts', () => {
+    const doc = parseDocument(
+      '# Root\n\n- DeleteMe <!-- ^d -->\n- Target <!-- ^t -->\n- Bad <!-- ^x --> <!-- ^y -->\n\n<!-- markmap: graph\nedges:\n  - from: d\n    to: t\n-->\n',
+    ).document;
+    const deleted = applyCommand(doc, { type: 'delete', node: find(doc, 'DeleteMe').id });
+    expect(deleted.document.source).not.toContain('DeleteMe');
+    expect(deleted.document.conventionIssues.some((issue) => issue.code === 'E_IDENTITY')).toBe(
+      true,
+    );
+
+    const pasteTarget = parseDocument(
+      '# Root\n\n- Target\n- Bad <!-- ^x --> <!-- ^y -->\n',
+    ).document;
+    const pasted = applyCommand(pasteTarget, {
+      type: 'insertBlock',
+      node: find(pasteTarget, 'Target').id,
+      text: '- P <!-- ^p -->\n\n<!-- markmap: graph\nedges:\n  - from: p\n    to: root\n-->',
+    });
+    expect(pasted.document.graph.edges).toHaveLength(1);
+    expect(pasted.document.conventionIssues.some((issue) => issue.code === 'E_IDENTITY')).toBe(
+      true,
+    );
+  });
 });

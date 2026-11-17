@@ -246,8 +246,26 @@ describe('graph', () => {
     const before = parseDocument('# Root\n\n- A <!-- ^a -->\n').document;
     const same = parseDocument('# Root\n\n- A <!-- ^a -->\n').document;
     expect(newConventionIssues(before, same)).toEqual([]);
+    const shifted = parseDocument('# Root\n\n- Shifted\n- A <!-- ^a -->\n').document;
+    expect(newConventionIssues(before, shifted)).toEqual([]);
     const more = parseDocument('# Root\n\n- A <!-- ^a -->\n- B <!-- ^b -->\n').document;
     expect(newConventionIssues(before, more).length).toBeGreaterThan(0);
+  });
+
+  it('[TC-1-21-10] rejects self-loop edges', () => {
+    const doc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n\n<!-- markmap: graph\nedges:\n  - from: a\n    to: a\n-->\n',
+    ).document;
+    expect(codes(doc)).toContain('E_GRAPH');
+    expect(messages(doc)).toMatch(/itself/i);
+  });
+
+  it('[TC-1-21-11] rejects duplicate edges', () => {
+    const doc = parseDocument(
+      '# Root\n\n- A <!-- ^a -->\n- B <!-- ^b -->\n\n<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n  - from: a\n    to: b\n-->\n',
+    ).document;
+    expect(codes(doc)).toContain('E_GRAPH');
+    expect(messages(doc)).toMatch(/duplicate/i);
   });
 
   it('[TC-1-21-7] serializes one canonical block and keeps the source bytes', () => {
