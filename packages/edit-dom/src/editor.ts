@@ -29,9 +29,10 @@ const DRAG_PAN_MAX = 14;
 const DRAG_EXPAND_MS = 400;
 const SNAP_BACK_MS = 140;
 
+type CommandWithNode = Extract<Command, { node: string }>;
 type CommandWithoutNode = {
-  [K in Command['type']]: Omit<Extract<Command, { type: K }>, 'node'>;
-}[Command['type']];
+  [K in CommandWithNode['type']]: Omit<Extract<CommandWithNode, { type: K }>, 'node'>;
+}[CommandWithNode['type']];
 const STYLE = `
 .mm-editor-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
 .mm-editor-field{position:absolute;display:none;margin:0;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;line-height:1.25;text-align:center;white-space:pre-wrap;resize:none;overflow:hidden;outline:none;box-sizing:border-box;pointer-events:auto;transform-origin:top left}
@@ -162,6 +163,7 @@ interface DropTarget {
 
 interface DragState {
   nodeId: string;
+  nodeIds: string[];
   pointerId: number;
   startX: number;
   startY: number;
@@ -192,6 +194,7 @@ export class MarkmapEditor {
   private readonly container: HTMLElement;
   private readonly field: HTMLTextAreaElement;
   private readonly selectionBox: HTMLDivElement;
+  private readonly extraSelectionBoxes: HTMLDivElement[] = [];
   private readonly indicator: HTMLDivElement;
   private readonly layer: HTMLDivElement;
   private readonly history = new History();
@@ -205,6 +208,7 @@ export class MarkmapEditor {
   private doc: MarkdownDocument;
   private title = '';
   private selectedId: string | null = null;
+  private selectedIds: string[] = [];
   private selectionOffset = 0;
   private editing: Editing | null = null;
   private notes: NotesEditing | null = null;
@@ -268,6 +272,7 @@ export class MarkmapEditor {
     this.stops.push(this.view.on('zoom', this.handleViewChange));
 
     this.selectedId = this.doc.root;
+    this.selectedIds = [this.doc.root];
     this.selectionOffset = this.doc.nodes.get(this.doc.root)?.label?.start ?? 0;
     this.setMode(false);
     this.paintSelection();
@@ -509,6 +514,7 @@ export class MarkmapEditor {
     this.container.classList.remove(MODE_SELECT, MODE_EDIT);
     this.editing = null;
     this.selectedId = null;
+    this.selectedIds = [];
   }
 
   private handleInput = (): void => {
@@ -553,7 +559,7 @@ export class MarkmapEditor {
       return;
     }
     if ((hit.kind === 'node' || hit.kind === 'toggle') && hit.nodeId) {
-      this.select(hit.nodeId, { reveal: false });
+      this.selectFromClick(hit.nodeId, event);
       this.container.focus({ preventScroll: true });
     }
   };
@@ -599,11 +605,16 @@ export class MarkmapEditor {
     if (!nodeId) return;
     const node = this.doc.nodes.get(nodeId);
     if (!node?.capabilities.move) return;
+    const nodeIds =
+      this.selectedIds.length > 1 && this.selectedIds.includes(nodeId)
+        ? this.selectedIdsInOrder(this.selectedIds)
+        : [nodeId];
     if (this.editing && this.commitEditing() === 'error') return;
     const win = this.container.ownerDocument.defaultView;
     if (!win) return;
     this.drag = {
       nodeId,
+      nodeIds,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -611,7 +622,7 @@ export class MarkmapEditor {
       clientY: event.clientY,
       active: false,
       ghost: null,
-      sourceIds: this.subtreeIds(nodeId),
+      sourceIds: nodeIds.flatMap((id) => this.subtreeIds(id)),
       folds: [...this.view.foldedIds],
       target: null,
       hover: null,
@@ -679,12 +690,12 @@ export class MarkmapEditor {
 
   private startDrag(drag: DragState): void {
     drag.active = true;
-    this.select(drag.nodeId, { reveal: false });
+    if (!this.selectedIds.includes(drag.nodeId)) this.select(drag.nodeId, { reveal: false });
     this.container.classList.add('mm-editor-dragging');
     if (typeof this.container.setPointerCapture === 'function') {
       this.container.setPointerCapture(drag.pointerId);
     }
-    const ghost = this.buildGhost(drag.nodeId, drag.sourceIds);
+    const ghost = this.buildGhost(drag.nodeIds, drag.sourceIds);
     drag.ghost = ghost;
     this.view.element.append(ghost);
     this.paintDragSource(drag);
@@ -706,17 +717,18 @@ export class MarkmapEditor {
     this.updateAutoPan(drag);
   }
 
-  private buildGhost(nodeId: string, ids: string[]): SVGElement {
+  private buildGhost(rootIds: readonly string[], ids: readonly string[]): SVGElement {
     const svg = this.view.element;
     const ghost = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');
     ghost.classList.add('mm-editor-drag-ghost');
     const content = svg.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');
     const { k, x, y } = this.view.transform;
     content.setAttribute('transform', `matrix(${k} 0 0 ${k} ${x} ${y})`);
+    const roots = new Set(rootIds);
     const keys = new Set<string>();
     for (const id of ids) {
       keys.add(`node:${id}`);
-      if (id !== nodeId) keys.add(`edge:${id}`);
+      if (!roots.has(id)) keys.add(`edge:${id}`);
     }
     for (const element of svg.querySelectorAll('[data-key]')) {
       const key = element.getAttribute('data-key');
@@ -783,6 +795,7 @@ export class MarkmapEditor {
     const dragged = this.doc.nodes.get(drag.nodeId);
     if (!dragged) return null;
     const excluded = new Set(drag.sourceIds);
+    const draggedIds = new Set(drag.nodeIds);
     const boxes: Array<{ node: EditNode; rect: Rect }> = [];
     for (const id of this.doc.order) {
       const node = this.doc.nodes.get(id);
@@ -797,7 +810,7 @@ export class MarkmapEditor {
         y >= box.rect.y - 4 &&
         y <= box.rect.y + box.rect.height + 4
       ) {
-        return this.zoneTarget(dragged, box.node, box.rect, x, y, false);
+        return this.zoneTarget(draggedIds, box.node, box.rect, x, y, false);
       }
     }
     const root = this.doc.nodes.get(this.doc.root);
@@ -810,7 +823,7 @@ export class MarkmapEditor {
         y >= rootRect.y - 48 &&
         y <= rootRect.y + rootRect.height + 48
       ) {
-        return this.rootTarget(root, dragged, rootRect, x, y);
+        return this.rootTarget(root, draggedIds, rootRect, x, y);
       }
     }
     let nearest: { node: EditNode; rect: Rect } | null = null;
@@ -824,11 +837,11 @@ export class MarkmapEditor {
         nearest = box;
       }
     }
-    return nearest ? this.zoneTarget(dragged, nearest.node, nearest.rect, x, y, true) : null;
+    return nearest ? this.zoneTarget(draggedIds, nearest.node, nearest.rect, x, y, true) : null;
   }
 
   private zoneTarget(
-    dragged: EditNode,
+    draggedIds: ReadonlySet<string>,
     node: EditNode,
     rect: Rect,
     x: number,
@@ -863,7 +876,7 @@ export class MarkmapEditor {
       } else {
         return {
           parentId: node.id,
-          index: node.children.filter((id) => id !== dragged.id).length,
+          index: node.children.filter((id) => !draggedIds.has(id)).length,
           kind,
           targetId: node.id,
         };
@@ -873,7 +886,7 @@ export class MarkmapEditor {
     if (!parentId) return null;
     const parent = this.doc.nodes.get(parentId);
     if (!parent) return null;
-    const siblings = parent.children.filter((id) => id !== dragged.id);
+    const siblings = parent.children.filter((id) => !draggedIds.has(id));
     const base = siblings.indexOf(node.id);
     return {
       parentId,
@@ -885,12 +898,12 @@ export class MarkmapEditor {
 
   private rootTarget(
     root: EditNode,
-    dragged: EditNode,
+    draggedIds: ReadonlySet<string>,
     rootRect: Rect,
     x: number,
     y: number,
   ): DropTarget | null {
-    const siblings = root.children.filter((id) => id !== dragged.id);
+    const siblings = root.children.filter((id) => !draggedIds.has(id));
     if (!siblings.length) return null;
     const wanted = x < rootRect.x + rootRect.width / 2 ? 'left' : 'right';
     const sided = siblings.filter((id) => this.view.direction(id) === wanted);
@@ -1017,7 +1030,11 @@ export class MarkmapEditor {
       this.suppressClick = true;
       this.applyFoldState(drag.folds);
       if (drop && drag.target) {
-        this.moveTo(drag.target.parentId, drag.target.index, drag.nodeId);
+        if (drag.nodeIds.length > 1) {
+          this.moveGroupTo(drag.target.parentId, drag.target.index, drag.nodeIds);
+        } else {
+          this.moveTo(drag.target.parentId, drag.target.index, drag.nodeId);
+        }
       }
     }
     const ghost = drag.ghost;
@@ -1100,6 +1117,35 @@ export class MarkmapEditor {
     }
   }
 
+  private moveGroupByKey(key: 'ArrowUp' | 'ArrowDown'): void {
+    const ids = this.selectedIdsInOrder(this.selectedIds);
+    const first = this.doc.nodes.get(ids[0]);
+    const parent = first?.parent ? this.doc.nodes.get(first.parent) : undefined;
+    if (parent) {
+      const selected = new Set(ids);
+      const siblings = parent.children.filter((id) => !selected.has(id));
+      const firstIndex = parent.children.indexOf(ids[0]);
+      const lastIndex = parent.children.indexOf(ids[ids.length - 1]);
+      if (key === 'ArrowUp') {
+        if (firstIndex <= 0) return;
+        const previous = parent.children[firstIndex - 1];
+        this.moveGroupTo(parent.id, siblings.indexOf(previous), ids);
+        return;
+      }
+      if (lastIndex >= parent.children.length - 1) return;
+      const next = parent.children[lastIndex + 1];
+      this.moveGroupTo(parent.id, siblings.indexOf(next) + 1, ids);
+    }
+  }
+
+  private moveGroupTo(parentId: string, index: number, ids: readonly string[]): boolean {
+    const nodes = ids.filter((id) => this.doc.nodes.has(id));
+    const result = this.run({ type: 'moveNodes', nodes, parent: parentId, index });
+    if (!result) return false;
+    this.ensureVisible(this.selectedIds[0]);
+    return true;
+  }
+
   private moveTo(parentId: string, index: number, nodeId: string): boolean {
     const node = this.doc.nodes.get(nodeId);
     if (!node) return false;
@@ -1139,7 +1185,11 @@ export class MarkmapEditor {
     if (!this.selectedId) return;
     if (mod && event.shiftKey && event.key.startsWith('Arrow')) {
       event.preventDefault();
-      this.moveByKey(event.key);
+      if (this.selectedIds.length > 1 && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        this.moveGroupByKey(event.key);
+      } else {
+        this.moveByKey(event.key);
+      }
       return;
     }
     switch (event.key) {
@@ -1155,6 +1205,13 @@ export class MarkmapEditor {
       case 'Delete':
       case 'Backspace':
         event.preventDefault();
+        if (this.selectedIds.length > 1) {
+          this.run({
+            type: 'deleteNodes',
+            nodes: this.selectedIdsInOrder(this.selectedIds),
+          });
+          return;
+        }
         if (this.selectedNode()?.kind === 'root') return;
         this.runSelected({ type: 'delete' });
         return;
@@ -1165,6 +1222,11 @@ export class MarkmapEditor {
         return;
       case 'Escape':
         event.preventDefault();
+        if (this.selectedIds.length > 1) {
+          const anchor = this.selectedId ?? this.selectedIds[0];
+          this.selectionOffset = this.offsetOf(anchor);
+          this.select(anchor, { reveal: false });
+        }
         return;
       case 'ArrowUp':
       case 'ArrowDown':
@@ -1553,7 +1615,15 @@ export class MarkmapEditor {
       this.render(this.doc.source, result.tree);
     }
     this.restoreFolds(folds, result);
-    this.selectAt(result.selection, { reveal: false });
+    if (command.type === 'moveNodes') {
+      const children = result.document.nodes.get(command.parent)?.children ?? [];
+      const moved = children.slice(command.index, command.index + command.nodes.length);
+      const anchor = moved[0];
+      this.selectionOffset = this.offsetOf(anchor);
+      this.selectGroup(moved, anchor, { reveal: false });
+    } else {
+      this.selectAt(result.selection, { reveal: false });
+    }
     if (command.type === 'setNotes') this.select(command.node, { reveal: false });
     this.emitChange();
     return result;
@@ -1714,6 +1784,7 @@ export class MarkmapEditor {
       editing.preview = false;
       editing.previewId = editing.nodeId;
       this.selectedId = editing.nodeId;
+      this.selectedIds = [editing.nodeId];
     }
     editing.draft = null;
     editing.draftText = null;
@@ -1841,6 +1912,51 @@ export class MarkmapEditor {
     if (child) this.select(child);
   }
 
+  private selectFromClick(id: string, event: MouseEvent): void {
+    const node = this.doc.nodes.get(id);
+    if (!node) return;
+    const anchor = this.selectedNode();
+    const parentId = node.parent;
+    const sameParent = anchor !== undefined && parentId !== null && anchor.parent === parentId;
+    if (sameParent && anchor) {
+      const parent = this.doc.nodes.get(node.parent ?? this.doc.root);
+      if (parent) {
+        if (event.shiftKey) {
+          const from = parent.children.indexOf(anchor.id);
+          const to = parent.children.indexOf(node.id);
+          const start = Math.min(from, to);
+          const end = Math.max(from, to);
+          this.selectionOffset = this.offsetOf(anchor.id);
+          this.selectGroup(parent.children.slice(start, end + 1), anchor.id, { reveal: false });
+          return;
+        } else if (event.metaKey || event.ctrlKey) {
+          if (node.id === anchor.id) {
+            this.selectionOffset = this.offsetOf(anchor.id);
+            return;
+          }
+          const ids = this.selectedIds.includes(node.id)
+            ? this.selectedIds.filter((selected) => selected !== node.id)
+            : [...this.selectedIds, node.id];
+          this.selectionOffset = this.offsetOf(anchor.id);
+          this.selectGroup(ids, anchor.id, { reveal: false });
+          return;
+        }
+      }
+    }
+    this.selectionOffset = this.offsetOf(node.id);
+    this.select(node.id, { reveal: false });
+  }
+
+  private offsetOf(id: string): number {
+    const node = this.doc.nodes.get(id);
+    return node?.label?.start ?? node?.block?.start ?? this.selectionOffset;
+  }
+
+  private selectedIdsInOrder(ids: readonly string[]): string[] {
+    const selected = new Set(ids.filter((id) => this.doc.nodes.has(id)));
+    return this.doc.order.filter((id) => selected.has(id));
+  }
+
   private selectAt(offset: number, options: { reveal?: boolean } = {}): void {
     this.selectionOffset = offset;
     const node = nodeAtOffset(this.doc, offset);
@@ -1849,9 +1965,19 @@ export class MarkmapEditor {
   }
 
   private select(id: string | null, options: { reveal?: boolean } = {}): void {
-    this.selectedId = id;
+    this.selectGroup(id ? [id] : [], id, options);
+  }
+
+  private selectGroup(
+    ids: readonly string[],
+    anchor: string | null,
+    options: { reveal?: boolean } = {},
+  ): void {
+    const ordered = this.selectedIdsInOrder(ids);
+    this.selectedIds = ordered;
+    this.selectedId = anchor && ordered.includes(anchor) ? anchor : (ordered[0] ?? null);
     this.paintSelection();
-    if (id && options.reveal !== false) this.ensureVisible(id);
+    if (this.selectedId && options.reveal !== false) this.ensureVisible(this.selectedId);
   }
 
   private ensureVisible(id: string): void {
@@ -1890,11 +2016,14 @@ export class MarkmapEditor {
   }
 
   private historyEntry(): HistoryEntry {
-    return {
+    const group = this.selectedIdsInOrder(this.selectedIds);
+    const entry: HistoryEntry = {
       source: this.doc.source,
-      selection: this.selectionOffset,
+      selection: this.selectedId ? this.offsetOf(this.selectedId) : this.selectionOffset,
       folded: [...this.view.foldedIds],
     };
+    if (group.length > 1) entry.group = group.map((id) => this.offsetOf(id));
+    return entry;
   }
 
   private restore(entry: HistoryEntry): void {
@@ -1905,8 +2034,25 @@ export class MarkmapEditor {
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
     this.render(this.doc.source, parsed.tree);
     this.view.setFoldedIds(entry.folded, { animate: false });
-    this.selectAt(entry.selection, { reveal: false });
+    this.restoreSelection(entry);
     this.emitChange();
+  }
+
+  private restoreSelection(entry: HistoryEntry): void {
+    const group = entry.group;
+    if (group?.length) {
+      const ids: string[] = [];
+      for (const offset of group) {
+        const node = nodeAtOffset(this.doc, offset);
+        if (node && !ids.includes(node.id)) ids.push(node.id);
+      }
+      const anchor = nodeAtOffset(this.doc, entry.selection);
+      const anchorId = anchor && ids.includes(anchor.id) ? anchor.id : ids[0];
+      this.selectionOffset = this.offsetOf(anchorId);
+      this.selectGroup(ids, anchorId, { reveal: false });
+      return;
+    }
+    this.selectAt(entry.selection, { reveal: false });
   }
 
   private captureFolds(doc: MarkdownDocument): Array<{ offset: number }> {
@@ -1936,6 +2082,10 @@ export class MarkmapEditor {
     this.view.element.querySelectorAll('.mm-editor-selected').forEach((element) => {
       element.classList.remove('mm-editor-selected');
     });
+    for (const box of this.extraSelectionBoxes) box.remove();
+    this.extraSelectionBoxes.length = 0;
+    const painted = this.editing ? [this.editing.previewId] : this.selectedIds;
+    for (const id of painted) this.nodeGroup(id)?.classList.add('mm-editor-selected');
     const id = this.editing?.previewId ?? this.selectedId;
     if (!id) {
       this.selectionBox.style.display = 'none';
@@ -1946,22 +2096,33 @@ export class MarkmapEditor {
       this.selectionBox.style.display = 'none';
       return;
     }
-    this.nodeGroup(id)?.classList.add('mm-editor-selected');
     if (this.drag?.active) {
       this.selectionBox.style.display = 'none';
       return;
     }
-    const rect = this.view.screenRect(id);
-    const box = this.container.getBoundingClientRect();
-    if (!rect) {
-      this.selectionBox.style.display = 'none';
-      return;
+    const boxes: HTMLDivElement[] = [this.selectionBox];
+    while (boxes.length < painted.length) {
+      const box = this.container.ownerDocument.createElement('div');
+      box.className = 'mm-editor-selection';
+      this.layer.insertBefore(box, this.indicator);
+      this.extraSelectionBoxes.push(box);
+      boxes.push(box);
     }
-    this.selectionBox.style.display = 'block';
-    this.selectionBox.style.left = `${rect.x - box.x - 2}px`;
-    this.selectionBox.style.top = `${rect.y - box.y - 2}px`;
-    this.selectionBox.style.width = `${rect.width + 4}px`;
-    this.selectionBox.style.height = `${rect.height + 4}px`;
+    const box = this.container.getBoundingClientRect();
+    for (const [index, nodeId] of painted.entries()) {
+      const frame = boxes[index];
+      if (!frame) continue;
+      const rect = this.view.screenRect(nodeId);
+      if (!rect) {
+        frame.style.display = 'none';
+        continue;
+      }
+      frame.style.display = 'block';
+      frame.style.left = `${rect.x - box.x - 2}px`;
+      frame.style.top = `${rect.y - box.y - 2}px`;
+      frame.style.width = `${rect.width + 4}px`;
+      frame.style.height = `${rect.height + 4}px`;
+    }
   }
 
   private paintEditing(): void {

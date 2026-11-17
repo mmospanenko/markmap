@@ -150,9 +150,9 @@ function key(target: EventTarget, value: string, init: KeyboardEventInit = {}) {
   return target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, ...init }));
 }
 
-function clickNode(container: HTMLElement, view: FakeView, id: string) {
+function clickNode(container: HTMLElement, view: FakeView, id: string, init: MouseEventInit = {}) {
   view.hit = { kind: 'node', nodeId: id };
-  container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+  container.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ...init }));
 }
 
 function selectedId(editor: MarkmapEditor): string {
@@ -166,6 +166,24 @@ function nodeId(editor: MarkmapEditor, text: string): string {
     if (node && labelText(editor.document, node) === text) return id;
   }
   throw new Error(`No node ${text}`);
+}
+
+function selectedLabels(view: FakeView, editor: MarkmapEditor): string[] {
+  for (const id of editor.document.order) {
+    if (view.element.querySelector(`[data-key="node:${id}"]`)) continue;
+    const node = document.createElement('div');
+    node.dataset.key = `node:${id}`;
+    view.element.append(node);
+  }
+  view.emit('render');
+  const labels: string[] = [];
+  for (const id of editor.document.order) {
+    const selected = view.element.querySelector(`[data-key="node:${id}"]`);
+    if (!selected?.classList.contains('mm-editor-selected')) continue;
+    const node = editor.document.nodes.get(id);
+    if (node) labels.push(labelText(editor.document, node));
+  }
+  return labels;
 }
 
 function type(container: HTMLElement, value: string) {
@@ -3528,5 +3546,263 @@ describe('move', () => {
     clickNode(container, view, editor.document.root);
     key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
     expect(editor.source).toBe('- a\n');
+  });
+});
+
+describe('sibling multi-selection', () => {
+  it('[TC-2-28-1] toggles a sibling with Cmd/Ctrl click', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'b'), { metaKey: true });
+    clickNode(container, view, nodeId(editor, 'a'), { metaKey: true });
+    expect(selectedLabels(view, editor)).toEqual(['a', 'b']);
+    clickNode(container, view, nodeId(editor, 'b'), { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n');
+    expect(changes).toHaveLength(0);
+
+    key(container, 'Delete');
+    expect(editor.source).toBe('- b\n- c\n');
+  });
+
+  it('[TC-2-28-2] selects the inclusive sibling range from the anchor with Shift click', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { shiftKey: true });
+    key(container, 'Delete');
+    expect(editor.source).toBe('- a\n- d\n');
+  });
+
+  it('[TC-2-28-3] clears the group to one node with a plain click', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'a'), { metaKey: true });
+    key(container, 'Delete');
+    expect(editor.source).toBe('- c\n');
+  });
+
+  it('[TC-2-28-4] starts a new selection on a node under another parent', () => {
+    const { container, view, editor } = setup('- a\n  - a1\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    clickNode(container, view, nodeId(editor, 'a1'), { metaKey: true });
+    clickNode(container, view, nodeId(editor, 'b'), { ctrlKey: true });
+    clickNode(container, view, nodeId(editor, 'c'), { ctrlKey: true });
+    key(container, 'Delete');
+    expect(editor.source).toBe('- a\n  - a1\n');
+  });
+
+  it('[TC-2-28-5] clears the group and keeps the anchor on Escape', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'Escape');
+    key(container, 'Delete');
+    expect(editor.source).toBe('- b\n- c\n');
+  });
+
+  it('[TC-2-28-6] changes no source or history while the selection changes', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n- c\n');
+    const anchor = nodeId(editor, 'a');
+    clickNode(container, view, anchor);
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    expect(editor.selected).toBe(anchor);
+    clickNode(container, view, 'missing');
+    expect(editor.selected).toBe(anchor);
+    expect(editor.source).toBe('- a\n- b\n- c\n');
+    expect(changes).toHaveLength(0);
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-28-7] draws a frame around every selected sibling', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    view.rects.set(nodeId(editor, 'a'), { x: 10, y: 20, width: 100, height: 30 });
+    view.rects.set(nodeId(editor, 'c'), { x: 10, y: 70, width: 100, height: 30 });
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+
+    const frames = container.querySelectorAll<HTMLElement>('.mm-editor-selection');
+    expect(Array.from(frames, (frame) => frame.style.display)).toEqual(['block', 'block']);
+    expect(Array.from(frames, (frame) => frame.style.top)).toEqual(['18px', '68px']);
+
+    key(container, 'Escape');
+    expect(container.querySelectorAll('.mm-editor-selection')).toHaveLength(1);
+  });
+
+  it('[TC-2-29-1] records one history entry for a group delete', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'Backspace');
+    expect(editor.source).toBe('- a\n- d\n');
+    expect(changes).toHaveLength(1);
+    expect(editor.canUndo).toBe(true);
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+  });
+
+  it('[TC-2-29-2] records one history entry for a keyboard group move', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- b\n- c\n- a\n- d\n');
+    expect(changes).toHaveLength(1);
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+  });
+
+  it('[TC-2-29-3] records one history entry for a pointer group move', () => {
+    const { container, view, editor, changes } = setup('- a\n- b\n- c\n');
+    setLayout(container);
+    stack(view, editor);
+    const a = nodeId(editor, 'a');
+    clickNode(container, view, a);
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    view.hit = { kind: 'node', nodeId: a };
+
+    pointer(container, 'pointerdown', 60, 25);
+    pointer(window, 'pointermove', 66, 30);
+    pointer(window, 'pointermove', 60, 71);
+    pointer(window, 'pointerup', 60, 71);
+
+    expect(editor.source).toBe('- a\n- c\n- b\n');
+    expect(changes).toHaveLength(1);
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n');
+  });
+
+  it('[TC-2-29-4] keeps a block action on the anchor node', () => {
+    const { container, view, editor } = setup('- a\n  - a1\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    expect(editor.selectedBlock()).toBe('- a\n  - a1');
+  });
+
+  it('[TC-2-29-5] keeps the moved group selected in its new order after a keyboard move', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- b\n- c\n- a\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+    expect(editor.selected).toBe(nodeId(editor, 'b'));
+
+    key(container, 'ArrowDown', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+    expect(editor.selected).toBe(nodeId(editor, 'b'));
+  });
+
+  it('[TC-2-29-6] restores the group selection with undo and redo', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- b\n- c\n- a\n- d\n');
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+    expect(editor.selected).toBe(nodeId(editor, 'b'));
+
+    key(container, 'z', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- b\n- c\n- a\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+    expect(editor.selected).toBe(nodeId(editor, 'b'));
+  });
+
+  it('[TC-2-29-7] restores the deleted group selection with undo', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'Backspace');
+    expect(editor.source).toBe('- a\n- d\n');
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+    expect(editor.selected).toBe(nodeId(editor, 'b'));
+  });
+
+  it('[TC-2-29-8] keeps a cross-parent group selected after its ids change', () => {
+    const { container, view, editor } = setup('- p\n  - x\n- a\n- b\n');
+    setLayout(container);
+    stack(view, editor);
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'b'), { metaKey: true });
+    const a = nodeId(editor, 'a');
+    view.hit = { kind: 'node', nodeId: a };
+
+    pointer(container, 'pointerdown', 60, 205);
+    pointer(window, 'pointermove', 66, 210);
+    pointer(window, 'pointermove', 60, 145);
+    pointer(window, 'pointerup', 60, 145);
+
+    expect(editor.source).toBe('- p\n  - x\n    - a\n    - b\n');
+    expect(selectedLabels(view, editor)).toEqual(['a', 'b']);
+    expect(editor.selected).toBe(nodeId(editor, 'a'));
+    expect(editor.selected).not.toBe(a);
+  });
+
+  it('[TC-2-29-9] restores the post-delete fallback selection on redo', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n- d\n');
+    clickNode(container, view, nodeId(editor, 'b'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'Backspace');
+    expect(editor.source).toBe('- a\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['a']);
+
+    key(container, 'z', { metaKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['b', 'c']);
+
+    key(container, 'z', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- d\n');
+    expect(selectedLabels(view, editor)).toEqual(['a']);
+    expect(editor.selected).toBe(nodeId(editor, 'a'));
+  });
+
+  it('[TC-2-29-10] leaves a group move at the boundary unchanged', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'b'), { metaKey: true });
+    key(container, 'ArrowUp', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n');
+    expect(selectedLabels(view, editor)).toEqual(['a', 'b']);
+    expect(editor.canUndo).toBe(false);
+
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+    key(container, 'ArrowDown', { metaKey: true, shiftKey: true });
+    expect(editor.source).toBe('- a\n- b\n- c\n');
+    expect(selectedLabels(view, editor)).toEqual(['a', 'b', 'c']);
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it('[TC-2-29-11] reports a failed group move and keeps the document', () => {
+    const source = '# A\n\n## B\n\n### C\n\n## D\n\n## F\n\n##### E\n';
+    const { container, view, editor, errors } = setup(source);
+    setLayout(container);
+    stack(view, editor);
+    clickNode(container, view, nodeId(editor, 'B'));
+    clickNode(container, view, nodeId(editor, 'D'), { metaKey: true });
+    view.hit = { kind: 'node', nodeId: nodeId(editor, 'B') };
+
+    pointer(container, 'pointerdown', 60, 85);
+    pointer(window, 'pointermove', 66, 90);
+    pointer(window, 'pointermove', 60, 325);
+    pointer(window, 'pointerup', 60, 325);
+
+    expect(errors).toHaveLength(1);
+    expect(editor.source).toBe(source);
+    expect(selectedLabels(view, editor)).toEqual(['B', 'D']);
+    expect(editor.selected).toBe(nodeId(editor, 'B'));
+    expect(editor.canUndo).toBe(false);
   });
 });

@@ -35,6 +35,8 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 - [REQ-2-25] When an open label session loses its screen rect, the editor shall finish like Escape: restore the committed baseline and report that baseline once through `onDraftChange` when a different draft was emitted. It shall stay silent when nothing was emitted, on a file switch and on destroy, and a snapshot after the loss shall return the committed source.
 - [REQ-2-26] When the user types in an open label, the editor shall publish each saveable draft through `onDraftChange` immediately and apply at most one preview render per animation frame with the latest valid draft. A pending preview shall be flushed or cancelled before commit, cancel, source replacement or destroy and shall never overwrite the committed document; snapshots, focus and undo shall keep the latest text.
 - [REQ-2-27] When a label commit follows a valid preview for the same field text and document base, the editor shall reuse that preview result without re-planning the command and shall skip a view tree render whose source the view already draws. A draft invalidated by another command shall be recomputed against the current document, shall clear its preview flag and re-anchor the field to the committed node before the committed tree is drawn, and a pending preview frame shall not draw it; cancel and source replacement shall leave the committed source and its rendered tree intact; destroy shall cancel pending work and leave the committed source intact without drawing a draft, and the host then destroys the view; undo and redo shall restore exact sources; and the Tab commit shall reuse the draft and record one history entry. Label snapshots shall stay pure and return the current saveable source, and `onDraftChange` shall stay synchronous.
+- [REQ-2-28] On an editable map, a plain click shall select one node and make it the anchor. A Cmd or Ctrl click on a sibling of the anchor shall toggle that node in the selection without dropping the anchor, a Shift click shall select the inclusive sibling range from the anchor, and a click on a node under another parent shall start a new single-node selection. Escape shall clear the group and keep the anchor selected. Changing the selection shall change no Markdown, emit no change and record no history. A read-only map mounts no editor and therefore offers no multi-selection.
+- [REQ-2-29] When several siblings are selected, Delete or Backspace shall remove them and their subtrees through one batch delete command, Cmd or Ctrl+Shift+Up or Down shall move the block one step past the nearest unselected sibling in that direction, and a pointer drag that starts on a selected node shall move the block to the drop target as one contiguous block; a boundary move shall change nothing. A moved block shall stay selected with its first node as the anchor. After a group move or delete, undo and redo shall restore the selection of the restored state, and undo of a group delete shall select the deleted siblings again. Each group operation shall record one history entry and undo shall restore the exact bytes. A failed group operation shall report a notice, change no bytes and record no history. Host actions such as block copy, insert, notes, markers and toolbar commands shall keep using the anchor node only.
 
 ## Acceptance tests
 
@@ -67,6 +69,8 @@ Markmap v1 draws text primitives, not editable DOM. The editor therefore keeps t
 | REQ-2-25    | TC-2-25-1 ... TC-2-25-3                           |
 | REQ-2-26    | TC-2-26-1, TC-2-26-2                              |
 | REQ-2-27    | TC-2-27-1 ... TC-2-27-6                           |
+| REQ-2-28    | TC-2-28-1 ... TC-2-28-7                           |
+| REQ-2-29    | TC-2-29-1 ... TC-2-29-11                          |
 
 ## Decisions
 
@@ -115,5 +119,5 @@ Transitions:
 
 ## Out of scope
 
-- Touch drag, multi-select, clipboard detection, and a WYSIWYG inline editor.
+- Touch drag, group clipboard actions, clipboard detection, and a WYSIWYG inline editor.
 - A topic created by dropping on empty space, free coordinates, and saving fold state to Markdown.
