@@ -194,6 +194,7 @@ export class MarkmapEditor {
   private readonly container: HTMLElement;
   private readonly field: HTMLTextAreaElement;
   private readonly selectionBox: HTMLDivElement;
+  private readonly extraSelectionBoxes: HTMLDivElement[] = [];
   private readonly indicator: HTMLDivElement;
   private readonly layer: HTMLDivElement;
   private readonly history = new History();
@@ -2081,6 +2082,8 @@ export class MarkmapEditor {
     this.view.element.querySelectorAll('.mm-editor-selected').forEach((element) => {
       element.classList.remove('mm-editor-selected');
     });
+    for (const box of this.extraSelectionBoxes) box.remove();
+    this.extraSelectionBoxes.length = 0;
     const painted = this.editing ? [this.editing.previewId] : this.selectedIds;
     for (const id of painted) this.nodeGroup(id)?.classList.add('mm-editor-selected');
     const id = this.editing?.previewId ?? this.selectedId;
@@ -2097,17 +2100,29 @@ export class MarkmapEditor {
       this.selectionBox.style.display = 'none';
       return;
     }
-    const rect = this.view.screenRect(id);
-    const box = this.container.getBoundingClientRect();
-    if (!rect) {
-      this.selectionBox.style.display = 'none';
-      return;
+    const boxes: HTMLDivElement[] = [this.selectionBox];
+    while (boxes.length < painted.length) {
+      const box = this.container.ownerDocument.createElement('div');
+      box.className = 'mm-editor-selection';
+      this.layer.insertBefore(box, this.indicator);
+      this.extraSelectionBoxes.push(box);
+      boxes.push(box);
     }
-    this.selectionBox.style.display = 'block';
-    this.selectionBox.style.left = `${rect.x - box.x - 2}px`;
-    this.selectionBox.style.top = `${rect.y - box.y - 2}px`;
-    this.selectionBox.style.width = `${rect.width + 4}px`;
-    this.selectionBox.style.height = `${rect.height + 4}px`;
+    const box = this.container.getBoundingClientRect();
+    for (const [index, nodeId] of painted.entries()) {
+      const frame = boxes[index];
+      if (!frame) continue;
+      const rect = this.view.screenRect(nodeId);
+      if (!rect) {
+        frame.style.display = 'none';
+        continue;
+      }
+      frame.style.display = 'block';
+      frame.style.left = `${rect.x - box.x - 2}px`;
+      frame.style.top = `${rect.y - box.y - 2}px`;
+      frame.style.width = `${rect.width + 4}px`;
+      frame.style.height = `${rect.height + 4}px`;
+    }
   }
 
   private paintEditing(): void {

@@ -3615,6 +3615,18 @@ describe('sibling multi-selection', () => {
     expect(editor.canUndo).toBe(false);
   });
 
+  it('[TC-2-28-7] draws a frame around every selected sibling', () => {
+    const { container, view, editor } = setup('- a\n- b\n- c\n');
+    clickNode(container, view, nodeId(editor, 'a'));
+    clickNode(container, view, nodeId(editor, 'c'), { metaKey: true });
+
+    const frames = container.querySelectorAll<HTMLElement>('.mm-editor-selection');
+    expect(Array.from(frames, (frame) => frame.style.display)).toEqual(['block', 'block']);
+
+    key(container, 'Escape');
+    expect(container.querySelectorAll('.mm-editor-selection')).toHaveLength(1);
+  });
+
   it('[TC-2-29-1] records one history entry for a group delete', () => {
     const { container, view, editor, changes } = setup('- a\n- b\n- c\n- d\n');
     clickNode(container, view, nodeId(editor, 'b'));
