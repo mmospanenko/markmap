@@ -402,4 +402,11 @@ describe('markmap options and directives', () => {
     expect(toPlainText(root.children[0].content)).toBe('a bold c');
     expect(JSON.stringify(root)).not.toContain('"html"');
   });
+
+  it('computes frontmatterRange when frontmatter is present and null when absent', () => {
+    const withFm = parse('---\ntitle: Sample\n---\n# Root\n');
+    expect(withFm.frontmatterRange).toEqual({ start: 0, end: 21 });
+    const withoutFm = parse('# Root\n');
+    expect(withoutFm.frontmatterRange).toBeNull();
+  });
 });

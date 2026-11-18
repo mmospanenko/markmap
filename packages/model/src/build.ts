@@ -22,9 +22,14 @@ export interface ParseDocumentResult {
 }
 
 export function parseDocument(source: string): ParseDocumentResult {
-  const { root, frontmatter, hasTitle, bodyStart, htmlBlocks } = parse(source);
+  const { root, frontmatter, hasTitle, bodyStart, htmlBlocks, frontmatterRange } = parse(source);
   return {
-    document: buildFromTree(source, root, { hasTitle, bodyStart, htmlBlocks }),
+    document: buildFromTree(source, root, {
+      hasTitle,
+      bodyStart,
+      htmlBlocks,
+      frontmatterRange: frontmatterRange ?? null,
+    }),
     tree: root,
     frontmatter,
   };
@@ -98,6 +103,7 @@ export function buildFromTree(source: string, root: MarkmapNode, meta: DocumentM
     identities: conventions.identities,
     graph: conventions.graph,
     conventionIssues: conventions.issues,
+    frontmatterRange: meta.frontmatterRange ?? null,
   };
 }
 

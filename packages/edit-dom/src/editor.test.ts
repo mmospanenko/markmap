@@ -4987,4 +4987,132 @@ describe('group boundary selection and editing', () => {
     expect(editor.document.graph.groups).toHaveLength(0);
     expect(editor.selectedBoundary).toBeNull();
   });
+
+  it('[TC-5-4-1] restores document source and editor layout state atomically on undo and redo', () => {
+    const errors: Error[] = [];
+    const { editor, container, view } = setup('# Root\n- a\n', {
+      onError: (err) => errors.push(err),
+    });
+    expect(editor.currentLayout).toBe('two-sided');
+
+    const aId = nodeId(editor, 'a');
+    clickNode(container, view, aId);
+    expect(editor.selected).toBe(aId);
+
+    editor.setLayout('org-chart');
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.document.source).toContain('layout: org-chart');
+    expect(editor.selected).toBe(aId);
+    expect(container.querySelector<HTMLElement>('.mm-editor-selection')?.style.display).toBe(
+      'block',
+    );
+
+    editor.setLayout('org-chart');
+    expect(editor.currentLayout).toBe('org-chart');
+
+    editor.undo();
+    expect(editor.currentLayout).toBe('two-sided');
+    expect(editor.document.source).not.toContain('layout: org-chart');
+    expect(editor.selected).toBe(aId);
+
+    editor.redo();
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.document.source).toContain('layout: org-chart');
+    expect(editor.selected).toBe(aId);
+
+    clickNode(container, view, editor.document.root);
+    expect(editor.selected).toBe(editor.document.root);
+
+    editor.setLayout('tree');
+    expect(editor.currentLayout).toBe('tree');
+    expect(editor.document.source).toContain('layout: tree');
+    expect(editor.selected).toBe(editor.document.root);
+
+    editor.setSource('---\nfoo: : bar\n  [invalid\n---\n# Root\n');
+    editor.setLayout('tree');
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toBe('Frontmatter contains YAML errors');
+  });
+
+  it('[TC-5-7-1] preserves sibling group selection across layout switch', () => {
+    const { editor, container, view } = setup('# Root\n- a\n- b\n');
+    const aId = nodeId(editor, 'a');
+    const bId = nodeId(editor, 'b');
+
+    clickNode(container, view, aId);
+    clickNode(container, view, bId, { metaKey: true });
+    expect(editor.selected).toBe(aId);
+
+    editor.setLayout('org-chart');
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.selected).toBe(aId);
+
+    // Verify both nodes still have group selection classes
+    const aEl = container.querySelector(`[data-key="node:${aId}"]`);
+    const bEl = container.querySelector(`[data-key="node:${bId}"]`);
+    expect(aEl?.classList.contains('mm-editor-selected')).toBe(true);
+    expect(bEl?.classList.contains('mm-editor-selected')).toBe(true);
+  });
+
+  it('[TC-5-7-2] preserves relationship arrow selection across layout switch', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { editor, container } = setup(source);
+    editor.selectRelation({ from: 'a', to: 'b' });
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+
+    editor.setLayout('org-chart');
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+
+    const relationEl = container.querySelector('.mm-editor-relation-selected');
+    expect(relationEl).not.toBeNull();
+
+    editor.undo();
+    expect(editor.currentLayout).toBe('two-sided');
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+
+    editor.redo();
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+  });
+
+  it('[TC-5-7-3] ignores invalid layout string without modifying document', () => {
+    const { editor } = setup('# Root\n- a\n');
+    const originalSource = editor.document.source;
+    editor.setLayout('invalid-layout');
+    expect(editor.currentLayout).toBe('two-sided');
+    expect(editor.document.source).toBe(originalSource);
+  });
+
+  it('[TC-5-7-4] commits an open note before layout switch and handles refused layouts safely', () => {
+    const { container, view, editor } = setup('# Root\n- a\n');
+    const field = openNotes(container, view, editor, 'a');
+    field.value = 'updated note';
+
+    editor.setLayout('org-chart');
+    expect(editor.isEditingNotes).toBe(false);
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.document.source).toContain('updated note');
+    expect(editor.document.source).toContain('layout: org-chart');
+
+    const refused = setup('---\nmarkmap:\n  layout: &chosen tree\ntheme: *chosen\n---\n# Root\n');
+    refused.editor.setLayout('org-chart');
+    expect(refused.errors.length).toBe(1);
+    expect(refused.errors[0].message).toContain('anchor');
+    expect(refused.editor.currentLayout).toBe('tree');
+    expect(refused.editor.document.source).not.toContain('org-chart');
+  });
+
+  it('[TC-5-7-5] preserves group boundary selection across layout switch', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n\n<!-- markmap: graph\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { editor } = setup(source);
+    editor.selectBoundary(0);
+    expect(editor.selectedBoundary).toBe(0);
+
+    editor.setLayout('org-chart');
+    expect(editor.currentLayout).toBe('org-chart');
+    expect(editor.selectedBoundary).toBe(0);
+  });
 });

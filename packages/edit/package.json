@@ -25,6 +25,7 @@
   "dependencies": {
     "@markmap/core": "workspace:*",
     "@markmap/model": "workspace:*",
-    "@markmap/parse": "workspace:*"
+    "@markmap/parse": "workspace:*",
+    "yaml": "^2.9.1"
   }
 }
