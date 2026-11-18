@@ -11,6 +11,9 @@ documents:
   - id: PRD-4
     title: Soft tree theme
     path: prd/0004-soft-theme.md
+  - id: PRD-5
+    title: Layout frontmatter persistence
+    path: prd/0005-layout-frontmatter.md
   - id: ADR-1
     title: Source-preserving edits over a validated model
     path: adr/0001-source-preserving-edits.md

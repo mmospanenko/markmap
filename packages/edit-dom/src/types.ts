@@ -59,4 +59,5 @@ export interface HistoryEntry {
   folded: string[];
   group?: number[];
   selectedGroup?: number | null;
+  selectedRelation?: { from: string; to: string } | null;
 }

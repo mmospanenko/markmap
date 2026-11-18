@@ -22,6 +22,7 @@ export interface ParseResult {
   bodyStart: number;
   /** Top-level raw HTML blocks with their source ranges. */
   htmlBlocks: HtmlBlock[];
+  frontmatterRange?: SourceRange | null;
 }
 
 export interface HtmlBlock {
@@ -40,6 +41,18 @@ export function parse(markdown: string, options: ParseOptions = {}): ParseResult
     hasTitle: Boolean(title),
     bodyStart: readBodyStart(markdown, mdast),
     htmlBlocks: readHtmlBlocks(mdast),
+    frontmatterRange: readFrontmatterRange(mdast),
+  };
+}
+
+function readFrontmatterRange(mdast: Root): SourceRange | null {
+  const node = mdast.children.find((child) => child.type === 'yaml');
+  if (!node || node.position?.start.offset == null || node.position?.end.offset == null) {
+    return null;
+  }
+  return {
+    start: node.position.start.offset,
+    end: node.position.end.offset,
   };
 }
 

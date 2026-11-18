@@ -1,3 +1,5 @@
+import type { SourceRange } from '@markmap/core';
+
 export interface Range {
   start: number;
   end: number;
@@ -19,6 +21,7 @@ export interface DocumentMeta {
   hasTitle: boolean;
   bodyStart: number;
   htmlBlocks?: HtmlBlockSource[];
+  frontmatterRange?: SourceRange | null;
 }
 
 export interface ListInfo {
@@ -98,6 +101,7 @@ export interface Document {
   identities: Map<string, string>;
   graph: GraphData;
   conventionIssues: Issue[];
+  frontmatterRange: SourceRange | null;
 }
 
 export type IssueCode =

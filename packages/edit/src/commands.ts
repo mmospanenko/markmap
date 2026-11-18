@@ -34,6 +34,7 @@ import {
   subtreeIds,
   type GraphRemoval,
 } from './graph';
+import { planSetLayout } from './layout';
 import {
   assertSingleLine,
   blockInsertion,
@@ -76,7 +77,8 @@ export type Command =
   | { type: 'setGroupLabel'; groupIndex: number; text: string }
   | { type: 'createEdge'; from: string; to: string; label?: string | null; random?: RandomSource }
   | { type: 'deleteEdge'; from: string; to: string }
-  | { type: 'setEdgeLabel'; from: string; to: string; label: string | null };
+  | { type: 'setEdgeLabel'; from: string; to: string; label: string | null }
+  | { type: 'setLayout'; layout: string; node?: string | null };
 
 export interface EditResult {
   document: Document;
@@ -137,6 +139,9 @@ export function planCommand(doc: Document, command: Command): Plan {
   }
   if (command.type === 'setEdgeLabel') {
     return planSetEdgeLabel(doc, command.from, command.to, command.label);
+  }
+  if (command.type === 'setLayout') {
+    return planSetLayout(doc, command.layout, command.node);
   }
   const node = nodeOf(doc, command.node);
   switch (command.type) {

@@ -231,6 +231,19 @@ interface ConnectHandlePosition extends Point {
   side: ConnectHandleSide;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function extractLayout(frontmatter: Record<string, unknown>): string {
+  const markmap = frontmatter.markmap;
+  if (isRecord(markmap)) {
+    const layout = markmap.layout;
+    if (typeof layout === 'string' && layout.length > 0) return layout;
+  }
+  return 'two-sided';
+}
+
 export class MarkmapEditor {
   private readonly view: EditView;
   private readonly container: HTMLElement;
@@ -256,6 +269,7 @@ export class MarkmapEditor {
   private readonly stops: Array<() => void> = [];
   private doc: MarkdownDocument;
   private title = '';
+  private layout = 'two-sided';
   private selectedId: string | null = null;
   private selectedIds: string[] = [];
   private selectedRelationRef: { from: string; to: string } | null = null;
@@ -264,6 +278,9 @@ export class MarkmapEditor {
   private editingGroup: EditingGroup | null = null;
   private selectedBoundaryIndex: number | null = null;
   private notes: NotesEditing | null = null;
+  private pendingLayoutRelation: { from: string; to: string } | null = null;
+  private pendingLayoutBoundary: number | null = null;
+  private pendingLayoutGroup: string[] | null = null;
   private drag: DragState | null = null;
   private connectDrag: ConnectDragState | null = null;
   private suppressClick = false;
@@ -288,6 +305,7 @@ export class MarkmapEditor {
     this.doc = parsed.document;
     this.renderedSource = this.doc.source;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
+    this.layout = extractLayout(parsed.frontmatter);
     this.onChange = onChange;
     this.onDraftChange = onDraftChange;
     this.onError = onError;
@@ -469,6 +487,28 @@ export class MarkmapEditor {
     return this.history.canRedo;
   }
 
+  get currentLayout(): string {
+    return this.layout;
+  }
+
+  setLayout(layout: string): void {
+    if (layout !== 'tree' && layout !== 'two-sided' && layout !== 'org-chart') return;
+    if (this.notes) {
+      if (this.commitNotes({ keepOpen: false }) === 'error') return;
+    }
+    if (this.editing && this.commitEditing() === 'error') return;
+    if (this.currentLayout === layout) return;
+    this.pendingLayoutRelation = this.selectedRelationRef ? { ...this.selectedRelationRef } : null;
+    this.pendingLayoutBoundary = this.selectedBoundaryIndex;
+    this.pendingLayoutGroup = this.selectedIds.length > 1 ? [...this.selectedIds] : null;
+    const result = this.run({ type: 'setLayout', layout, node: this.selectedId });
+    if (!result) {
+      this.pendingLayoutRelation = null;
+      this.pendingLayoutBoundary = null;
+      this.pendingLayoutGroup = null;
+    }
+  }
+
   get selectedBoundary(): number | null {
     return this.selectedBoundaryIndex;
   }
@@ -552,6 +592,7 @@ export class MarkmapEditor {
     this.completeEditing('switch', false);
     this.doc = parsed.document;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
+    this.layout = extractLayout(parsed.frontmatter);
     this.history.clear();
     this.render(this.doc.source, parsed.tree);
     const offset = options.selection ?? this.doc.nodes.get(this.doc.root)?.label?.start ?? 0;
@@ -2031,6 +2072,26 @@ export class MarkmapEditor {
       this.selectAt(result.selection, { reveal: false });
     }
     if (command.type === 'setNotes') this.select(command.node, { reveal: false });
+    if (command.type === 'setLayout') {
+      this.layout = command.layout;
+      if (this.pendingLayoutRelation) {
+        this.selectRelation(this.pendingLayoutRelation);
+      } else if (this.pendingLayoutBoundary !== null && this.pendingLayoutBoundary !== undefined) {
+        this.selectBoundary(this.pendingLayoutBoundary);
+      } else if (this.pendingLayoutGroup && this.pendingLayoutGroup.length > 1) {
+        const ids = this.pendingLayoutGroup.filter((id) => this.doc.nodes.has(id));
+        if (ids.length > 1) {
+          const anchor = command.node && ids.includes(command.node) ? command.node : ids[0];
+          this.selectionOffset = this.offsetOf(anchor);
+          this.selectGroup(ids, anchor, { reveal: false });
+        }
+      } else if (command.node && this.doc.nodes.has(command.node)) {
+        this.select(command.node, { reveal: false });
+      }
+      this.pendingLayoutRelation = null;
+      this.pendingLayoutBoundary = null;
+      this.pendingLayoutGroup = null;
+    }
     this.emitChange();
     return result;
   }
@@ -2430,6 +2491,7 @@ export class MarkmapEditor {
       selection: this.selectedId ? this.offsetOf(this.selectedId) : this.selectionOffset,
       folded: [...this.view.foldedIds],
       selectedGroup: this.selectedBoundaryIndex,
+      selectedRelation: this.selectedRelationRef ? { ...this.selectedRelationRef } : null,
     };
     if (group.length > 1) entry.group = group.map((id) => this.offsetOf(id));
     return entry;
@@ -2441,6 +2503,7 @@ export class MarkmapEditor {
     this.completeEditing('switch', false);
     this.doc = parsed.document;
     this.title = typeof parsed.frontmatter.title === 'string' ? parsed.frontmatter.title : '';
+    this.layout = extractLayout(parsed.frontmatter);
     this.render(this.doc.source, parsed.tree);
     this.view.setFoldedIds(entry.folded, { animate: false });
     this.restoreSelection(entry);
@@ -2448,6 +2511,10 @@ export class MarkmapEditor {
   }
 
   private restoreSelection(entry: HistoryEntry): void {
+    if (entry.selectedRelation) {
+      this.selectRelation(entry.selectedRelation);
+      return;
+    }
     if (
       entry.selectedGroup !== undefined &&
       entry.selectedGroup !== null &&

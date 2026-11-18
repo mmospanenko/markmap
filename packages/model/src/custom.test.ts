@@ -1,6 +1,6 @@
 import type { MarkmapNode } from '@markmap/core';
 import { describe, expect, it } from 'vitest';
-import { buildFromTree, indentColumns } from '.';
+import { buildFromTree, indentColumns, parseDocument } from '.';
 
 function node(overrides: Partial<MarkmapNode>): MarkmapNode {
   return {
@@ -103,5 +103,12 @@ describe('custom trees', () => {
     );
     expect(doc.unit).toBe('  ');
     expect(indentColumns(doc.nodes.get(doc.root)!)).toBe(0);
+  });
+
+  it('records frontmatterRange in parseDocument', () => {
+    const { document: docWithFm } = parseDocument('---\ntitle: Sample\n---\n# Root\n');
+    expect(docWithFm.frontmatterRange).toEqual({ start: 0, end: 21 });
+    const { document: docNoFm } = parseDocument('# Root\n');
+    expect(docNoFm.frontmatterRange).toBeNull();
   });
 });
