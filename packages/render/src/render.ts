@@ -352,6 +352,7 @@ export function drawState(state: DrawState, theme: Theme): Primitive[] {
         fill: 'var(--mm-group-fill)',
         stroke: 'var(--mm-group-border)',
         strokeWidth: 1.5,
+        strokeDashArray: [5, 4],
       },
     ];
     if (group.label) {

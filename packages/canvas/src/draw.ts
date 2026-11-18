@@ -97,7 +97,7 @@ export function drawPrimitives(
   };
 
   const finish = (
-    p: Pick<RectPrimitive, 'fill' | 'stroke' | 'strokeWidth'>,
+    p: Pick<RectPrimitive, 'fill' | 'stroke' | 'strokeWidth' | 'strokeDashArray'>,
     fill: () => void,
     stroke: () => void,
   ) => {
@@ -110,7 +110,13 @@ export function drawPrimitives(
     if (strokeStyle) {
       ctx.strokeStyle = strokeStyle;
       ctx.lineWidth = p.strokeWidth ?? 1;
-      stroke();
+      const lineDash = ctx.getLineDash();
+      ctx.setLineDash(p.strokeDashArray ?? []);
+      try {
+        stroke();
+      } finally {
+        ctx.setLineDash(lineDash);
+      }
     }
   };
 

@@ -100,8 +100,8 @@ class FakeView implements EditView {
     return this.hit;
   }
 
-  layoutPoint(): [number, number] {
-    return [0, 0];
+  layoutPoint(clientX: number, clientY: number): [number, number] {
+    return [clientX, clientY];
   }
 
   on(kind: 'render' | 'zoom' | 'fold', listener: () => void): () => void {
@@ -117,6 +117,48 @@ class FakeView implements EditView {
 }
 
 const liveEditors: MarkmapEditor[] = [];
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function relationElements(
+  from: string,
+  to: string,
+  label: string | null,
+): { relation: SVGGElement; midpoint: SVGGElement } {
+  const relation = document.createElementNS(SVG_NS, 'g');
+  relation.setAttribute('data-key', `relation:${from}:${to}`);
+  const shaft = document.createElementNS(SVG_NS, 'path');
+  shaft.setAttribute('d', 'M0,0C0,0 0,0 0,0');
+  shaft.setAttribute(
+    'style',
+    'fill:none;stroke:var(--mm-edge-relation);stroke-width:1.5;stroke-dasharray:5 4',
+  );
+  const hitGroup = document.createElementNS(SVG_NS, 'g');
+  const hitPath = document.createElementNS(SVG_NS, 'path');
+  hitPath.setAttribute('d', 'M0,0C0,0 0,0 0,0');
+  hitPath.setAttribute('style', 'fill:none;stroke:transparent;stroke-width:10');
+  hitGroup.append(hitPath);
+  const arrow = document.createElementNS(SVG_NS, 'path');
+  arrow.setAttribute('d', 'M0,0L1,1L1,-1Z');
+  arrow.setAttribute('style', 'fill:var(--mm-edge-relation)');
+  relation.append(shaft, hitGroup, arrow);
+  if (label) {
+    const labelBackground = document.createElementNS(SVG_NS, 'rect');
+    labelBackground.setAttribute('style', 'fill:var(--mm-bg);stroke:var(--mm-edge-relation)');
+    const labelElement = document.createElementNS(SVG_NS, 'text');
+    relation.append(labelBackground, labelElement);
+  }
+
+  const midpoint = document.createElementNS(SVG_NS, 'g');
+  midpoint.setAttribute('data-key', `relation-midpoint:${from}:${to}`);
+  const marker = document.createElementNS(SVG_NS, 'rect');
+  marker.setAttribute('x', '0');
+  marker.setAttribute('y', '0');
+  marker.setAttribute('width', '1');
+  marker.setAttribute('height', '1');
+  marker.setAttribute('style', 'fill:none');
+  midpoint.append(marker);
+  return { relation, midpoint };
+}
 
 function setup(source = '- a\n- b\n', options: Partial<MarkmapEditorOptions> = {}) {
   const container = document.createElement('div');
@@ -154,19 +196,8 @@ function setup(source = '- a\n- b\n', options: Partial<MarkmapEditorOptions> = {
     view.element.append(node);
   }
   for (const edge of editor.document.graph?.edges ?? []) {
-    const rel = document.createElement('div');
-    rel.dataset.key = `relation:${edge.from}:${edge.to}`;
-    const line = document.createElement('div');
-    line.className = 'mm-relation-line';
-    const arrow = document.createElement('div');
-    arrow.className = 'mm-relation-arrow';
-    rel.append(line, arrow);
-    if (edge.label) {
-      const label = document.createElement('div');
-      label.className = 'mm-relation-label';
-      rel.append(label);
-    }
-    view.element.append(rel);
+    const elements = relationElements(edge.from, edge.to, edge.label);
+    view.element.append(elements.relation, elements.midpoint);
   }
   view.emit('render');
   return { container, view, editor, changes, drafts, errors };
@@ -189,22 +220,22 @@ function syncRelationElements(view: FakeView, editor: MarkmapEditor): void {
     const relationKey = `relation:${edge.from}:${edge.to}`;
     let rel = view.element.querySelector(`[data-key="${relationKey}"]`);
     if (!rel) {
-      rel = document.createElement('div');
-      rel.setAttribute('data-key', relationKey);
-      const line = document.createElement('div');
-      line.className = 'mm-relation-line';
-      const arrow = document.createElement('div');
-      arrow.className = 'mm-relation-arrow';
-      rel.append(line, arrow);
-      view.element.append(rel);
+      const elements = relationElements(edge.from, edge.to, edge.label);
+      view.element.append(elements.relation, elements.midpoint);
+      continue;
     }
-    const existingLabel = rel.querySelector('.mm-relation-label');
+    const existingLabel = rel.querySelector(':scope > text');
     if (edge.label && !existingLabel) {
-      const label = document.createElement('div');
-      label.className = 'mm-relation-label';
-      rel.append(label);
+      const labelBackground = document.createElementNS(SVG_NS, 'rect');
+      labelBackground.setAttribute('style', 'fill:var(--mm-bg);stroke:var(--mm-edge-relation)');
+      const labelElement = document.createElementNS(SVG_NS, 'text');
+      rel.append(labelBackground, labelElement);
     } else if (!edge.label && existingLabel) {
       existingLabel.remove();
+      rel.querySelector(':scope > rect')?.remove();
+    }
+    if (!view.element.querySelector(`[data-key="relation-midpoint:${edge.from}:${edge.to}"]`)) {
+      view.element.append(relationElements(edge.from, edge.to, edge.label).midpoint);
     }
   }
 }
@@ -4214,11 +4245,11 @@ describe('sibling multi-selection', () => {
     editor.setEdgeLabel('a', 'b', 'labeled');
     syncRelationElements(view, editor);
     const updatedRelEl = view.element.querySelector('[data-key="relation:a:b"]');
-    const labelGroup = updatedRelEl?.querySelector('.mm-relation-label');
-    if (!labelGroup) {
-      throw new Error('No label group');
+    const renderedLabel = updatedRelEl?.querySelector('text');
+    if (!renderedLabel) {
+      throw new Error('No relation label');
     }
-    labelGroup.getBoundingClientRect = () => ({
+    renderedLabel.getBoundingClientRect = () => ({
       x: 100,
       y: 100,
       width: 50,
@@ -4233,7 +4264,7 @@ describe('sibling multi-selection', () => {
     expect(rf.style.display).toBe('block');
     rf.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
-    labelGroup.getBoundingClientRect = () => ({
+    renderedLabel.getBoundingClientRect = () => ({
       x: 0,
       y: 0,
       width: 0,
@@ -4266,6 +4297,553 @@ describe('sibling multi-selection', () => {
     rf.style.display = 'block';
     rf.dispatchEvent(new FocusEvent('blur'));
     expect(rf.style.display).toBe('none');
+  });
+
+  it('[TC-2-32-10] places tree and two-sided connect handles above selected nodes', () => {
+    const { container, view, editor } = setup('# Root\n\n## Left\n\n## Right\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+
+    const rootId = editor.document.root;
+    const leftId = nodeId(editor, 'Left');
+    const rootRect = { x: 300, y: 180, width: 120, height: 30 };
+    const leftRect = { x: 500, y: 280, width: 80, height: 20 };
+    view.rects.set(rootId, rootRect);
+    view.rects.set(leftId, leftRect);
+    view.directions.set(rootId, 'right');
+    view.directions.set(leftId, 'left');
+
+    clickNode(container, view, rootId);
+    const handle = connectHandle(container);
+    expect(handle?.style.display).toBe('block');
+    expect(Number.parseFloat(handle?.style.left ?? '')).toBe(360);
+    expect(Number.parseFloat(handle?.style.top ?? '')).toBe(162);
+
+    clickNode(container, view, leftId);
+    expect(Number.parseFloat(handle?.style.left ?? '')).toBe(540);
+    expect(Number.parseFloat(handle?.style.top ?? '')).toBe(262);
+  });
+
+  it('[TC-2-32-11] places the tree connect handle below when there is no room above', () => {
+    const { container, view, editor } = setup('# Root\n\n## Branch\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+
+    const branchId = nodeId(editor, 'Branch');
+    view.rects.set(branchId, { x: 200, y: 0, width: 30, height: 8 });
+    view.directions.set(branchId, 'right');
+    clickNode(container, view, branchId);
+
+    const handle = connectHandle(container);
+    expect(Number.parseFloat(handle?.style.left ?? '')).toBe(215);
+    expect(Number.parseFloat(handle?.style.top ?? '')).toBe(26);
+  });
+
+  it('[TC-2-32-12] keeps the tree connect handle outside the fold hit area across zoom levels for small nodes', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+
+    const aId = nodeId(editor, 'a');
+    const rect = { x: 350, y: 250, width: 1, height: 2 };
+    view.directions.set(aId, 'right');
+    clickNode(container, view, aId);
+
+    for (const scale of [0.25, 1, 3]) {
+      view.scale = scale;
+      view.transform = { k: scale, x: 0, y: 0 };
+      view.rects.set(aId, rect);
+      view.emit('zoom');
+
+      const handle = connectHandle(container);
+      if (!handle) throw new Error('No handle');
+      const handleLeft = Number.parseFloat(handle.style.left) - 6;
+      const handleRight = handleLeft + 12;
+      const handleTop = Number.parseFloat(handle.style.top) - 6;
+      const handleBottom = handleTop + 12;
+      const foldRadius = 10 * scale;
+      const foldLeft = rect.x - foldRadius;
+      const foldRight = rect.x + rect.width + foldRadius;
+      const foldTop = rect.y - foldRadius;
+      const foldBottom = rect.y + rect.height + foldRadius;
+      const disjoint =
+        handleRight <= foldLeft ||
+        handleLeft >= foldRight ||
+        handleBottom <= foldTop ||
+        handleTop >= foldBottom;
+
+      expect(disjoint).toBe(true);
+      expect(Number.parseFloat(handle.style.top)).toBe(rect.y - foldRadius - 8);
+    }
+  });
+
+  it('[TC-2-32-13] keeps org-chart connect handles beside roots, branches, and leaves', () => {
+    const { container, view, editor } = setup('# Root\n\n## Branch\n\n### Leaf\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+
+    const rootId = editor.document.root;
+    const branchId = nodeId(editor, 'Branch');
+    const leafId = nodeId(editor, 'Leaf');
+    const nodes = [
+      { id: rootId, rect: { x: 300, y: 100, width: 80, height: 30 } },
+      { id: branchId, rect: { x: 340, y: 180, width: 60, height: 20 } },
+      { id: leafId, rect: { x: 440, y: 280, width: 20, height: 8 } },
+    ];
+    for (const node of nodes) {
+      view.rects.set(node.id, node.rect);
+      view.directions.set(node.id, 'bottom');
+      clickNode(container, view, node.id);
+
+      const handle = connectHandle(container);
+      if (!handle) throw new Error('No handle');
+      const handleLeft = Number.parseFloat(handle.style.left) - 6;
+      const handleTop = Number.parseFloat(handle.style.top) - 6;
+      expect(Number.parseFloat(handle.style.left)).toBe(node.rect.x + node.rect.width + 18);
+      expect(Number.parseFloat(handle.style.top)).toBe(node.rect.y + node.rect.height / 2);
+      expect(handleLeft).toBeGreaterThanOrEqual(node.rect.x + node.rect.width + 10);
+      expect(handleTop + 12).toBeLessThanOrEqual(node.rect.y + node.rect.height + 10);
+    }
+  });
+
+  it('[TC-2-32-14] starts the connect preview at the handle center in layout coordinates and follows view changes', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    const bounds = new DOMRect(100, 50, 800, 600);
+    container.getBoundingClientRect = () => bounds;
+    view.element.getBoundingClientRect = () => bounds;
+    const layer = container.querySelector<HTMLElement>('.mm-editor-layer');
+    if (!layer) throw new Error('No editor layer');
+    layer.getBoundingClientRect = () => bounds;
+
+    const sourceId = nodeId(editor, 'a');
+    const layoutRects = new Map([
+      [sourceId, { x: 100, y: 80, width: 40, height: 20 }],
+      [nodeId(editor, 'b'), { x: 300, y: 100, width: 40, height: 20 }],
+    ]);
+    view.transform = { k: 2, x: 30, y: 15 };
+    view.scale = 2;
+    view.directions.set(sourceId, 'right');
+    view.screenRect = (id) => {
+      const rect = layoutRects.get(id);
+      if (!rect || !view.known.has(id) || view.hidden.has(id)) return undefined;
+      return {
+        x: bounds.x + rect.x * view.transform.k + view.transform.x,
+        y: bounds.y + rect.y * view.transform.k + view.transform.y,
+        width: rect.width * view.transform.k,
+        height: rect.height * view.transform.k,
+      };
+    };
+    view.layoutPoint = (clientX, clientY) => [
+      (clientX - bounds.x - view.transform.x) / view.transform.k,
+      (clientY - bounds.y - view.transform.y) / view.transform.k,
+    ];
+
+    clickNode(container, view, sourceId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+    const startClientX = bounds.x + Number.parseFloat(handle.style.left);
+    const startClientY = bounds.y + Number.parseFloat(handle.style.top);
+    const startLayout = view.layoutPoint(startClientX, startClientY);
+    const pointerClientX = startClientX + 5;
+    const pointerClientY = startClientY + 4;
+    pointer(handle, 'pointerdown', startClientX, startClientY);
+    pointer(window, 'pointermove', pointerClientX, pointerClientY);
+
+    const preview = connectPreview(container);
+    const line = preview?.querySelector('path');
+    const initialPoint = line?.getAttribute('d')?.match(/^M([-\d.]+),([-\d.]+)C/u);
+    const initialEnd = line
+      ?.getAttribute('d')
+      ?.match(/C[-\d.]+,[-\d.]+\s+[-\d.]+,[-\d.]+\s+([-\d.]+),([-\d.]+)/u);
+    if (!initialPoint?.[1] || !initialPoint[2]) throw new Error('No preview start');
+    if (!initialEnd?.[1] || !initialEnd[2]) throw new Error('No preview end');
+    expect([Number(initialPoint[1]), Number(initialPoint[2])]).toEqual(startLayout);
+    expect([Number(initialEnd[1]), Number(initialEnd[2])]).toEqual(
+      view.layoutPoint(pointerClientX, pointerClientY),
+    );
+    expect(preview?.firstElementChild?.getAttribute('transform')).toBe('translate(30,15) scale(2)');
+
+    view.transform = { k: 0.75, x: 60, y: 20 };
+    view.scale = 0.75;
+    view.emit('zoom');
+
+    const sourceRect = view.screenRect(sourceId);
+    if (!sourceRect) throw new Error('No source rect');
+    const changedCenterX = sourceRect.x + sourceRect.width / 2;
+    const changedCenterY = sourceRect.y - 10 * view.scale - 8;
+    const changedLayout = view.layoutPoint(changedCenterX, changedCenterY);
+    const changedPoint = line?.getAttribute('d')?.match(/^M([-\d.]+),([-\d.]+)C/u);
+    const changedEnd = line
+      ?.getAttribute('d')
+      ?.match(/C[-\d.]+,[-\d.]+\s+[-\d.]+,[-\d.]+\s+([-\d.]+),([-\d.]+)/u);
+    if (!changedPoint?.[1] || !changedPoint[2]) throw new Error('No updated preview start');
+    if (!changedEnd?.[1] || !changedEnd[2]) throw new Error('No updated preview end');
+    expect([Number(changedPoint[1]), Number(changedPoint[2])]).toEqual(changedLayout);
+    expect([Number(changedEnd[1]), Number(changedEnd[2])]).toEqual(
+      view.layoutPoint(pointerClientX, pointerClientY),
+    );
+    expect(preview?.firstElementChild?.getAttribute('transform')).toBe(
+      'translate(60,20) scale(0.75)',
+    );
+
+    pointer(window, 'pointercancel', 0, 0);
+  });
+
+  it('[TC-2-32-15] keeps connect handle spacing safe when the map scale is nonpositive', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+    view.scale = 0;
+    view.transform = { k: 0, x: 0, y: 0 };
+
+    const aId = nodeId(editor, 'a');
+    view.rects.set(aId, { x: 300, y: 200, width: 40, height: 20 });
+    view.directions.set(aId, 'right');
+    clickNode(container, view, aId);
+
+    const handle = connectHandle(container);
+    expect(handle?.style.display).toBe('block');
+    expect(Number.parseFloat(handle?.style.left ?? '')).toBe(320);
+    expect(Number.parseFloat(handle?.style.top ?? '')).toBe(182);
+  });
+
+  it('[TC-2-32-16] places an org-chart connect handle left of a node near the right viewport edge', () => {
+    const { container, view, editor } = setup('# Root\n\n## Branch\n\n### Leaf\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+
+    const branchId = nodeId(editor, 'Branch');
+    const rect = { x: 740, y: 180, width: 40, height: 20 };
+    view.rects.set(branchId, rect);
+    view.directions.set(branchId, 'bottom');
+    clickNode(container, view, branchId);
+
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+    expect(Number.parseFloat(handle.style.left)).toBe(722);
+    expect(Number.parseFloat(handle.style.top)).toBe(190);
+    expect(Number.parseFloat(handle.style.left) - 6 + 12).toBeLessThanOrEqual(rect.x);
+  });
+
+  it('[TC-2-32-17] starts the connect preview at the center of the rendered handle box', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    const bounds = new DOMRect(100, 50, 800, 600);
+    container.getBoundingClientRect = () => bounds;
+    view.element.getBoundingClientRect = () => bounds;
+    const layer = container.querySelector<HTMLElement>('.mm-editor-layer');
+    if (!layer) throw new Error('No editor layer');
+    layer.getBoundingClientRect = () => bounds;
+    view.layoutPoint = (clientX, clientY) => [clientX - bounds.x, clientY - bounds.y];
+
+    const aId = nodeId(editor, 'a');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+    const handleRect = new DOMRect(320, 200, 12, 12);
+    handle.getBoundingClientRect = () => handleRect;
+    const startX = handleRect.x + handleRect.width / 2;
+    const startY = handleRect.y + handleRect.height / 2;
+    pointer(handle, 'pointerdown', startX, startY);
+    pointer(window, 'pointermove', startX + 5, startY + 4);
+
+    const start = connectPreview(container)?.querySelector('path')?.getAttribute('d');
+    expect(start?.startsWith(`M${startX - bounds.x},${startY - bounds.y}C`)).toBe(true);
+
+    pointer(window, 'pointercancel', 0, 0);
+  });
+
+  it('[TC-2-32-18] keeps connect preview geometry finite when the layout transform scale is nonpositive', () => {
+    const { container, view, editor } = setup('- a\n- b\n');
+    view.scale = 0;
+    view.transform = { k: 0, x: 0, y: 0 };
+
+    const aId = nodeId(editor, 'a');
+    clickNode(container, view, aId);
+    const handle = connectHandle(container);
+    if (!handle) throw new Error('No handle');
+    const startX = Number.parseFloat(handle.style.left);
+    const startY = Number.parseFloat(handle.style.top);
+    pointer(handle, 'pointerdown', startX, startY);
+    pointer(window, 'pointermove', startX + 5, startY + 4);
+
+    const preview = connectPreview(container);
+    expect(preview?.firstElementChild?.getAttribute('transform')).toBe('translate(0,0) scale(1)');
+    for (const path of preview?.querySelectorAll('path') ?? []) {
+      expect(path.getAttribute('d')).not.toMatch(/NaN|Infinity/u);
+    }
+
+    pointer(window, 'pointercancel', 0, 0);
+  });
+
+  it('[TC-2-32-19] places a two-sided connect handle below a node at the top viewport edge', () => {
+    const { container, view, editor } = setup('# Root\n\n## Left\n\n## Right\n');
+    setLayout(container);
+    view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+
+    const leftId = nodeId(editor, 'Left');
+    view.rects.set(leftId, { x: 300, y: 0, width: 30, height: 20 });
+    view.directions.set(leftId, 'left');
+    clickNode(container, view, leftId);
+
+    const handle = connectHandle(container);
+    expect(Number.parseFloat(handle?.style.left ?? '')).toBe(315);
+    expect(Number.parseFloat(handle?.style.top ?? '')).toBe(38);
+  });
+
+  it('[TC-2-32-20] directs connect preview tangents away from nodes for every handle placement', () => {
+    const scenarios: Array<{
+      direction: Side;
+      rect: Rect;
+      pointerX: number;
+      pointerY: number;
+      axis: 'x' | 'y';
+      outward: -1 | 1;
+    }> = [
+      {
+        direction: 'right',
+        rect: { x: 300, y: 180, width: 80, height: 20 },
+        pointerX: 500,
+        pointerY: 280,
+        axis: 'y',
+        outward: -1,
+      },
+      {
+        direction: 'left',
+        rect: { x: 300, y: 0, width: 80, height: 20 },
+        pointerX: 400,
+        pointerY: 200,
+        axis: 'y',
+        outward: 1,
+      },
+      {
+        direction: 'bottom',
+        rect: { x: 300, y: 180, width: 80, height: 30 },
+        pointerX: 550,
+        pointerY: 250,
+        axis: 'x',
+        outward: 1,
+      },
+      {
+        direction: 'bottom',
+        rect: { x: 740, y: 180, width: 40, height: 20 },
+        pointerX: 600,
+        pointerY: 100,
+        axis: 'x',
+        outward: -1,
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { container, view, editor } = setup('# Root\n\n## Branch\n\n### Leaf\n');
+      setLayout(container);
+      view.element.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+      const branchId = nodeId(editor, 'Branch');
+      view.rects.set(branchId, scenario.rect);
+      view.directions.set(branchId, scenario.direction);
+      clickNode(container, view, branchId);
+
+      const handle = connectHandle(container);
+      if (!handle) throw new Error('No handle');
+      const startX = Number.parseFloat(handle.style.left);
+      const startY = Number.parseFloat(handle.style.top);
+      pointer(handle, 'pointerdown', startX, startY);
+      pointer(window, 'pointermove', scenario.pointerX, scenario.pointerY);
+
+      const path = connectPreview(container)?.querySelector('path')?.getAttribute('d');
+      const points = path?.match(/^M([-\d.]+),([-\d.]+)C([-\d.]+),([-\d.]+)/u);
+      if (!points?.[1] || !points[2] || !points[3] || !points[4]) {
+        throw new Error('No preview tangent');
+      }
+      const startAlongAxis = scenario.axis === 'x' ? Number(points[1]) : Number(points[2]);
+      const tangentAlongAxis = scenario.axis === 'x' ? Number(points[3]) : Number(points[4]);
+      const edge =
+        scenario.axis === 'x'
+          ? scenario.outward < 0
+            ? scenario.rect.x
+            : scenario.rect.x + scenario.rect.width
+          : scenario.outward < 0
+            ? scenario.rect.y
+            : scenario.rect.y + scenario.rect.height;
+
+      expect((startAlongAxis - edge) * scenario.outward).toBeGreaterThan(0);
+      expect((tangentAlongAxis - startAlongAxis) * scenario.outward).toBeGreaterThan(0);
+
+      pointer(window, 'pointercancel', 0, 0);
+    }
+  });
+
+  it('[TC-2-32-21] removes the relationship arrow instead of the group after selecting its hit path', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n- b <!-- ^b -->\n\n<!-- markmap: graph\nedges:\n  - from: a\n    to: b\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, view, editor } = setup(source);
+    const relation = view.element.querySelector('[data-key="relation:a:b"]');
+    if (!relation) throw new Error('No relation');
+    const hitPath = relation.querySelector(':scope > g > path');
+    if (!hitPath) throw new Error('No relation hit path');
+
+    editor.selectBoundary(0);
+    expect(editor.selectedBoundary).toBe(0);
+    hitPath.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(editor.selectedRelation).toEqual({ from: 'a', to: 'b' });
+    key(container, 'Delete');
+
+    expect(editor.document.graph?.groups).toHaveLength(1);
+    expect(editor.document.graph?.edges).toHaveLength(0);
+    expect(editor.document.nodes.size).toBe(3);
+  });
+
+  it('[TC-2-32-22] clears relationship arrow selection when selecting a group boundary', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n- b <!-- ^b -->\n\n<!-- markmap: graph\nedges:\n  - from: a\n    to: b\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { container, editor } = setup(source);
+    editor.selectRelation({ from: 'a', to: 'b' });
+    editor.selectBoundary(0);
+
+    expect(editor.selectedRelation).toBeNull();
+    expect(editor.selectedBoundary).toBe(0);
+    key(container, 'Delete');
+    expect(editor.document.graph?.groups).toHaveLength(0);
+    expect(editor.document.graph?.edges).toHaveLength(1);
+    expect(editor.document.nodes.size).toBe(3);
+  });
+
+  it('[TC-2-32-23] positions the relationship label editor over rendered label text', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n    label: detour\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    const bounds = new DOMRect(100, 50, 800, 600);
+    container.getBoundingClientRect = () => bounds;
+    const layer = container.querySelector<HTMLElement>('.mm-editor-layer');
+    if (!layer) throw new Error('No editor layer');
+    layer.getBoundingClientRect = () => bounds;
+
+    const relation = view.element.querySelector('[data-key="relation:a:b"]');
+    const label = relation?.querySelector('text');
+    if (!label) throw new Error('No rendered label text');
+    label.getBoundingClientRect = () => new DOMRect(460, 130, 60, 20);
+    editor.selectRelation({ from: 'a', to: 'b' });
+    editor.startEditingRelationLabel();
+
+    const relationInput = relationField(container);
+    expect(relationInput?.style.left).toBe('390px');
+    expect(relationInput?.style.top).toBe('90px');
+  });
+
+  it('[TC-2-32-24] positions an unlabelled relationship editor at the renderer midpoint marker', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    const bounds = new DOMRect(100, 50, 800, 600);
+    container.getBoundingClientRect = () => bounds;
+    view.element.getBoundingClientRect = () => bounds;
+    const layer = container.querySelector<HTMLElement>('.mm-editor-layer');
+    if (!layer) throw new Error('No editor layer');
+    layer.getBoundingClientRect = () => bounds;
+    view.rects.set(nodeId(editor, 'a'), { x: 140, y: 100, width: 40, height: 20 });
+    view.rects.set(nodeId(editor, 'b'), { x: 400, y: 100, width: 40, height: 20 });
+
+    const marker = view.element.querySelector('[data-key="relation-midpoint:a:b"]');
+    const markerRect = marker?.querySelector('rect');
+    if (!markerRect) throw new Error('No relationship midpoint marker');
+    markerRect.getBoundingClientRect = () => new DOMRect(300, 250, 1, 1);
+    editor.selectRelation({ from: 'a', to: 'b' });
+    editor.startEditingRelationLabel();
+
+    const relationInput = relationField(container);
+    expect(relationInput?.style.left).toBe('200.5px');
+    expect(relationInput?.style.top).toBe('200.5px');
+  });
+
+  it('[TC-2-32-25] falls back to endpoint midpoint when the renderer marker is unavailable', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    const bounds = new DOMRect(100, 50, 800, 600);
+    container.getBoundingClientRect = () => bounds;
+    const layer = container.querySelector<HTMLElement>('.mm-editor-layer');
+    if (!layer) throw new Error('No editor layer');
+    layer.getBoundingClientRect = () => bounds;
+    view.rects.set(nodeId(editor, 'a'), { x: 140, y: 100, width: 40, height: 20 });
+    view.rects.set(nodeId(editor, 'b'), { x: 400, y: 100, width: 40, height: 20 });
+
+    view.element.querySelector('[data-key="relation-midpoint:a:b"]')?.remove();
+    view.element
+      .querySelector('[data-key="relation:a:b"]')
+      ?.querySelector(':scope > path')
+      ?.remove();
+    editor.selectRelation({ from: 'a', to: 'b' });
+    editor.startEditingRelationLabel();
+
+    const relationInput = relationField(container);
+    expect(relationInput?.style.left).toBe('190px');
+    expect(relationInput?.style.top).toBe('60px');
+  });
+
+  it('[TC-2-32-26] clears relationship selection when a group label edit selects its boundary', () => {
+    const source =
+      '# Root\n\n- a <!-- ^a -->\n- b <!-- ^b -->\n\n<!-- markmap: graph\nedges:\n  - from: a\n    to: b\ngroups:\n  - roots: [a]\n    label: G1\n-->\n';
+    const { editor } = setup(source);
+    editor.selectRelation({ from: 'a', to: 'b' });
+
+    expect(editor.setGroupLabel(0, 'Renamed')).toBe(true);
+    expect(editor.selectedRelation).toBeNull();
+    expect(editor.selectedBoundary).toBe(0);
+  });
+
+  it('[TC-2-32-27] repositions an unlabelled relationship editor when its renderer marker moves', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { container, view, editor } = setup(source);
+    const bounds = new DOMRect(100, 50, 800, 600);
+    container.getBoundingClientRect = () => bounds;
+    const layer = container.querySelector<HTMLElement>('.mm-editor-layer');
+    if (!layer) throw new Error('No editor layer');
+    layer.getBoundingClientRect = () => bounds;
+
+    const relation = view.element.querySelector('[data-key="relation:a:b"]');
+    const marker = view.element.querySelector('[data-key="relation-midpoint:a:b"]');
+    const markerRect = marker?.querySelector('rect');
+    if (!markerRect || !relation) throw new Error('No rendered relationship midpoint');
+    markerRect.getBoundingClientRect = () => new DOMRect(530, 340, 1, 1);
+    editor.selectRelation({ from: 'a', to: 'b' });
+    editor.startEditingRelationLabel();
+
+    const relationInput = relationField(container);
+    expect(relationInput?.style.left).toBe('430.5px');
+    expect(relationInput?.style.top).toBe('290.5px');
+    markerRect.getBoundingClientRect = () => new DOMRect(630, 400, 1, 1);
+    view.emit('render');
+    expect(relationInput?.style.left).toBe('530.5px');
+    expect(relationInput?.style.top).toBe('350.5px');
+  });
+
+  it('[TC-2-32-28] styles only visible relationship paths on selection and render', () => {
+    const source =
+      '<!-- markmap: graph\nedges:\n  - from: a\n    to: b\n-->\n- a <!-- ^a -->\n- b <!-- ^b -->\n';
+    const { view, editor } = setup(source);
+    const relation = view.element.querySelector('[data-key="relation:a:b"]');
+    const paths = relation?.querySelectorAll(':scope > path');
+    const shaft = paths?.item(0);
+    const arrow = paths?.item(1);
+    const hitPath = relation?.querySelector(':scope > g > path');
+    if (!relation || !shaft || !arrow || !hitPath) throw new Error('No relation paths');
+
+    expect(shaft.classList.contains('mm-relation-line')).toBe(true);
+    expect(arrow.classList.contains('mm-relation-arrow')).toBe(true);
+    expect(hitPath.classList.contains('mm-relation-line')).toBe(false);
+    expect(hitPath.classList.contains('mm-relation-arrow')).toBe(false);
+
+    editor.selectRelation({ from: 'a', to: 'b' });
+    expect(relation.classList.contains('mm-editor-relation-selected')).toBe(true);
+    shaft.classList.remove('mm-relation-line');
+    arrow.classList.remove('mm-relation-arrow');
+    view.emit('render');
+
+    expect(shaft.classList.contains('mm-relation-line')).toBe(true);
+    expect(arrow.classList.contains('mm-relation-arrow')).toBe(true);
+    expect(hitPath.classList.contains('mm-relation-line')).toBe(false);
+    expect(hitPath.classList.contains('mm-relation-arrow')).toBe(false);
+    expect(relation.classList.contains('mm-editor-relation-selected')).toBe(true);
   });
 });
 

@@ -29,6 +29,10 @@ const DRAG_EDGE = 60;
 const DRAG_PAN_MAX = 14;
 const DRAG_EXPAND_MS = 400;
 const SNAP_BACK_MS = 140;
+const CONNECT_HANDLE_SIZE = 12;
+const CONNECT_HANDLE_HALF_SIZE = CONNECT_HANDLE_SIZE / 2;
+const CONNECT_FOLD_HIT_RADIUS = 10;
+const CONNECT_HANDLE_GAP = 2;
 
 type CommandWithNode = Extract<Command, { node: string }>;
 type CommandWithoutNode = {
@@ -63,8 +67,8 @@ const STYLE = `
 .mm-editor-connect-preview path{stroke:var(--oc-focus,#0097e6);stroke-width:2px;stroke-dasharray:4 4;fill:none}
 .mm-editor-connect-preview .mm-editor-connect-arrow{fill:var(--oc-focus,#0097e6);stroke:none}
 .mm-editor-connect-target{outline:2px dashed var(--oc-focus,#0097e6);outline-offset:2px}
-.mm-editor-relation-selected .mm-relation-line{stroke:var(--oc-focus,#0097e6);stroke-width:2.5px}
-.mm-editor-relation-selected .mm-relation-arrow{fill:var(--oc-focus,#0097e6)}
+.mm-editor-relation-selected .mm-relation-line{stroke:var(--oc-focus,#0097e6)!important;stroke-width:2.5px!important}
+.mm-editor-relation-selected .mm-relation-arrow{fill:var(--oc-focus,#0097e6)!important}
 .mm-editor-relation-selected .mm-relation-label rect{stroke:var(--oc-focus,#0097e6);stroke-width:2px}
 .mm-editor-relation-field{position:absolute;display:none;min-width:60px;max-width:240px;height:24px;padding:2px 8px;margin:-12px 0 0 0;transform:translate(-50%,-50%);border:1px solid var(--oc-focus,#0097e6);border-radius:4px;background:var(--oc-elevated,light-dark(#fff,#1f1f1f));color:inherit;font:inherit;font-size:12px;line-height:20px;text-align:center;outline:none;box-shadow:0 2px 8px rgba(0,0,0,.18);pointer-events:auto;z-index:5;box-sizing:border-box}
 `;
@@ -216,6 +220,17 @@ interface ConnectDragState {
   win: Window;
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+type ConnectHandleSide = 'top' | 'bottom' | 'left' | 'right';
+
+interface ConnectHandlePosition extends Point {
+  side: ConnectHandleSide;
+}
+
 export class MarkmapEditor {
   private readonly view: EditView;
   private readonly container: HTMLElement;
@@ -226,6 +241,7 @@ export class MarkmapEditor {
   private readonly layer: HTMLDivElement;
   private readonly connectHandle: HTMLDivElement;
   private readonly connectPreviewSvg: SVGElement;
+  private readonly connectPreviewGroup: SVGElement;
   private readonly connectPreviewLine: SVGElement;
   private readonly connectPreviewArrow: SVGElement;
   private readonly relationField: HTMLInputElement;
@@ -308,10 +324,12 @@ export class MarkmapEditor {
     this.connectPreviewSvg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.connectPreviewSvg.setAttribute('class', 'mm-editor-connect-preview');
     this.connectPreviewSvg.style.display = 'none';
+    this.connectPreviewGroup = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
     this.connectPreviewLine = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
     this.connectPreviewArrow = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
     this.connectPreviewArrow.setAttribute('class', 'mm-editor-connect-arrow');
-    this.connectPreviewSvg.append(this.connectPreviewLine, this.connectPreviewArrow);
+    this.connectPreviewGroup.append(this.connectPreviewLine, this.connectPreviewArrow);
+    this.connectPreviewSvg.append(this.connectPreviewGroup);
 
     this.relationField = doc.createElement('input');
     this.relationField.type = 'text';
@@ -370,6 +388,7 @@ export class MarkmapEditor {
   selectRelation(rel: { from: string; to: string } | null): void {
     this.selectedRelationRef = rel;
     if (rel) {
+      this.selectedBoundaryIndex = null;
       this.selectedId = null;
       this.selectedIds = [];
       if (this.relationField.style.display !== 'none') {
@@ -494,6 +513,7 @@ export class MarkmapEditor {
     if (this.selectedBoundaryIndex === index) return;
     if (this.editing && this.commitEditing() === 'error') return;
     if (index !== null) {
+      this.selectedRelationRef = null;
       this.selectedId = null;
       this.selectedIds = [];
     }
@@ -729,6 +749,8 @@ export class MarkmapEditor {
       this.paintDragSource(drag);
       this.paintDropTarget(drag);
     }
+    const connectDrag = this.connectDrag;
+    if (connectDrag?.active) this.updateConnectDrag(connectDrag);
   };
 
   private handleClick = (event: MouseEvent): void => {
@@ -1977,6 +1999,7 @@ export class MarkmapEditor {
       this.selectionOffset = this.offsetOf(anchor);
       this.selectGroup(moved, anchor, { reveal: false });
     } else if (command.type === 'createGroup') {
+      this.selectedRelationRef = null;
       this.selectedBoundaryIndex = result.document.graph.groups.length - 1;
       this.selectedId = null;
       this.selectedIds = [];
@@ -1985,6 +2008,7 @@ export class MarkmapEditor {
       this.selectedBoundaryIndex = null;
       this.selectAt(result.selection, { reveal: false });
     } else if (command.type === 'setGroupLabel') {
+      this.selectedRelationRef = null;
       this.selectedBoundaryIndex = command.groupIndex;
       this.selectedId = null;
       this.selectedIds = [];
@@ -2474,6 +2498,7 @@ export class MarkmapEditor {
   }
 
   private paintSelection(): void {
+    this.paintRelationPaths();
     this.view.element.querySelectorAll('.mm-editor-selected').forEach((element) => {
       element.classList.remove('mm-editor-selected');
     });
@@ -2565,13 +2590,11 @@ export class MarkmapEditor {
       selected &&
       !selected.opaque
     ) {
-      const rect = this.view.screenRect(selected.id);
-      if (rect) {
-        const dir = this.view.direction(selected.id);
-        const handleX = dir === 'left' ? rect.x - box.x : rect.x - box.x + rect.width;
-        const handleY = rect.y - box.y + rect.height / 2;
-        this.connectHandle.style.left = `${handleX}px`;
-        this.connectHandle.style.top = `${handleY}px`;
+      const handlePoint = this.connectHandlePosition(selected.id);
+      if (handlePoint) {
+        const layerRect = this.layer.getBoundingClientRect();
+        this.connectHandle.style.left = `${handlePoint.x - layerRect.x}px`;
+        this.connectHandle.style.top = `${handlePoint.y - layerRect.y}px`;
         this.connectHandle.style.display = 'block';
       } else {
         this.connectHandle.style.display = 'none';
@@ -2579,6 +2602,68 @@ export class MarkmapEditor {
     } else {
       this.connectHandle.style.display = 'none';
     }
+  }
+
+  private paintRelationPaths(): void {
+    for (const relation of this.view.element.querySelectorAll('[data-key^="relation:"]')) {
+      for (const path of relation.querySelectorAll<SVGPathElement>(':scope > path')) {
+        path.classList.remove('mm-relation-line', 'mm-relation-arrow');
+        if (path.style.stroke && path.style.stroke !== 'transparent') {
+          path.classList.add('mm-relation-line');
+        }
+        if (path.style.fill && path.style.fill !== 'none') {
+          path.classList.add('mm-relation-arrow');
+        }
+      }
+    }
+  }
+
+  private connectHandlePosition(nodeId: string): ConnectHandlePosition | undefined {
+    const rect = this.view.screenRect(nodeId);
+    if (!rect) return undefined;
+    const containerRect = this.container.getBoundingClientRect();
+    const viewRect = this.view.element.getBoundingClientRect();
+    const bounds = viewRect.width > 0 && viewRect.height > 0 ? viewRect : containerRect;
+    const scale = this.view.scale > 0 ? this.view.scale : 1;
+    const margin = CONNECT_FOLD_HIT_RADIUS * scale + CONNECT_HANDLE_HALF_SIZE + CONNECT_HANDLE_GAP;
+    const direction = this.view.direction(nodeId);
+
+    if (direction === 'bottom') {
+      const right = rect.x + rect.width + margin;
+      const left = rect.x - margin;
+      const rightFits = right + CONNECT_HANDLE_HALF_SIZE <= bounds.right;
+      const leftFits = left - CONNECT_HANDLE_HALF_SIZE >= bounds.left;
+      const side: ConnectHandleSide = rightFits || !leftFits ? 'right' : 'left';
+      return {
+        x: side === 'right' ? right : left,
+        y: rect.y + rect.height / 2,
+        side,
+      };
+    }
+
+    const above = rect.y - margin;
+    const below = rect.y + rect.height + margin;
+    const aboveFits = above - CONNECT_HANDLE_HALF_SIZE >= bounds.top;
+    const side: ConnectHandleSide = aboveFits ? 'top' : 'bottom';
+    return {
+      x: rect.x + rect.width / 2,
+      y: side === 'top' ? above : below,
+      side,
+    };
+  }
+
+  private connectHandleCenter(nodeId: string): ConnectHandlePosition | undefined {
+    const position = this.connectHandlePosition(nodeId);
+    if (!position) return undefined;
+    const rect = this.connectHandle.getBoundingClientRect();
+    if (this.connectHandle.style.display !== 'none' && rect.width > 0 && rect.height > 0) {
+      return {
+        ...position,
+        x: rect.x + rect.width / 2,
+        y: rect.y + rect.height / 2,
+      };
+    }
+    return position;
   }
 
   private handleConnectHandlePointerDown = (event: PointerEvent): void => {
@@ -2672,47 +2757,62 @@ export class MarkmapEditor {
   }
 
   private updateConnectPreview(drag: ConnectDragState): void {
+    const handlePosition = this.connectHandleCenter(drag.sourceId);
     const sRect = this.view.screenRect(drag.sourceId);
-    const box = this.container.getBoundingClientRect();
-    if (!sRect) {
+    if (!handlePosition || !sRect) {
       this.connectPreviewSvg.style.display = 'none';
       return;
     }
-    const sDir = this.view.direction(drag.sourceId);
-    const sX = sDir === 'left' ? sRect.x - box.x : sRect.x - box.x + sRect.width;
-    const sY = sRect.y - box.y + sRect.height / 2;
-
-    let tX = drag.clientX - box.x;
-    let tY = drag.clientY - box.y;
+    const [sX, sY] = this.view.layoutPoint(handlePosition.x, handlePosition.y);
+    let [tX, tY] = this.view.layoutPoint(drag.clientX, drag.clientY);
 
     if (drag.targetId) {
       const tRect = this.view.screenRect(drag.targetId);
       if (tRect) {
         const tDir = this.view.direction(drag.targetId);
-        tX = tDir === 'left' ? tRect.x - box.x + tRect.width : tRect.x - box.x;
-        tY = tRect.y - box.y + tRect.height / 2;
+        const targetX = tDir === 'left' ? tRect.x + tRect.width : tRect.x;
+        const targetY = tRect.y + tRect.height / 2;
+        [tX, tY] = this.view.layoutPoint(targetX, targetY);
       }
     }
 
     const dx = tX - sX;
     const dy = tY - sY;
     const dist = Math.hypot(dx, dy);
-    const offset = Math.max(20, Math.min(dist * 0.4, 120));
-    const cp1X = sDir === 'left' ? sX - offset : sX + offset;
-    const cp1Y = sY;
+    const transform = this.view.transform;
+    const scale = transform.k > 0 ? transform.k : 1;
+    const offset = Math.max(20, Math.min(dist * scale * 0.4, 120)) / scale;
+    const cp1X =
+      handlePosition.side === 'left'
+        ? sX - offset
+        : handlePosition.side === 'right'
+          ? sX + offset
+          : sX;
+    const cp1Y =
+      handlePosition.side === 'top'
+        ? sY - offset
+        : handlePosition.side === 'bottom'
+          ? sY + offset
+          : sY;
     const cp2X = dx >= 0 ? tX - offset : tX + offset;
     const cp2Y = tY;
 
+    const viewRect = this.view.element.getBoundingClientRect();
+    const layerRect = this.layer.getBoundingClientRect();
+    this.connectPreviewGroup.setAttribute(
+      'transform',
+      `translate(${viewRect.x - layerRect.x + transform.x},${viewRect.y - layerRect.y + transform.y}) scale(${scale})`,
+    );
     const d = `M${sX},${sY}C${cp1X},${cp1Y} ${cp2X},${cp2Y} ${tX},${tY}`;
     this.connectPreviewLine.setAttribute('d', d);
 
     const angle = dx >= 0 ? 0 : Math.PI;
-    const baseX = tX - 8 * Math.cos(angle);
-    const baseY = tY - 8 * Math.sin(angle);
-    const w1X = baseX - 4 * Math.sin(angle);
-    const w1Y = baseY + 4 * Math.cos(angle);
-    const w2X = baseX + 4 * Math.sin(angle);
-    const w2Y = baseY - 4 * Math.cos(angle);
+    const baseX = tX - (8 / scale) * Math.cos(angle);
+    const baseY = tY - (8 / scale) * Math.sin(angle);
+    const w1X = baseX - (4 / scale) * Math.sin(angle);
+    const w1Y = baseY + (4 / scale) * Math.cos(angle);
+    const w2X = baseX + (4 / scale) * Math.sin(angle);
+    const w2Y = baseY - (4 / scale) * Math.cos(angle);
     const arrowD = `M${tX},${tY}L${w1X},${w1Y}L${w2X},${w2Y}Z`;
     this.connectPreviewArrow.setAttribute('d', arrowD);
     this.connectPreviewSvg.style.display = 'block';
@@ -2763,15 +2863,26 @@ export class MarkmapEditor {
 
   private positionRelationField(from: string, to: string): void {
     const relEl = this.view.element.querySelector(`[data-key="relation:${from}:${to}"]`);
-    const labelGroup = relEl?.querySelector('.mm-relation-label');
-    const box = this.container.getBoundingClientRect();
-    if (labelGroup) {
-      const lRect = labelGroup.getBoundingClientRect();
-      if (lRect.width > 0) {
-        this.relationField.style.left = `${lRect.x - box.x + lRect.width / 2}px`;
-        this.relationField.style.top = `${lRect.y - box.y + lRect.height / 2}px`;
+    const relationLabel = relEl?.querySelector<SVGTextElement>(':scope > text');
+    const box = this.layer.getBoundingClientRect();
+    if (relationLabel) {
+      const labelRect = relationLabel.getBoundingClientRect();
+      if (labelRect.width > 0 && labelRect.height > 0) {
+        this.relationField.style.left = `${labelRect.x - box.x + labelRect.width / 2}px`;
+        this.relationField.style.top = `${labelRect.y - box.y + labelRect.height / 2}px`;
         return;
       }
+    }
+    const midpoint = this.view.element.querySelector(
+      `[data-key="relation-midpoint:${from}:${to}"]`,
+    );
+    const midpointRect = midpoint
+      ?.querySelector<SVGRectElement>(':scope > rect')
+      ?.getBoundingClientRect();
+    if (midpointRect && midpointRect.width > 0 && midpointRect.height > 0) {
+      this.relationField.style.left = `${midpointRect.x - box.x + midpointRect.width / 2}px`;
+      this.relationField.style.top = `${midpointRect.y - box.y + midpointRect.height / 2}px`;
+      return;
     }
     const srcNodeId = from === 'root' ? this.doc.root : (this.doc.identities.get(from) ?? from);
     const tgtNodeId = to === 'root' ? this.doc.root : (this.doc.identities.get(to) ?? to);
